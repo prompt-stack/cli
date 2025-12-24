@@ -1,0 +1,29 @@
+{
+  "name": "pstack-cli",
+  "version": "2.0.0",
+  "description": "Prompt Stack CLI - Package and runtime management",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "pstack": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test src/__tests__/",
+    "legacy": "node index.cjs"
+  },
+  "dependencies": {
+    "@prompt-stack/core": "workspace:*",
+    "@prompt-stack/manifest": "workspace:*",
+    "@prompt-stack/runner": "workspace:*"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prompt-stack/cli.git"
+  },
+  "license": "MIT"
+}
