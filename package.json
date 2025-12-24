@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=index.cjs --external:better-sqlite3",
     "test": "node --test src/__tests__/",
     "legacy": "node index.cjs"
   },
