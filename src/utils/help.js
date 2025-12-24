@@ -19,13 +19,13 @@ USAGE
   pstack <command> [options]
 
 COMMANDS
-  search <query>        Search for stacks, prompts, and runtimes
+  search <query>        Search for stacks, prompts, runtimes, tools, agents
   search --all          List all available packages in registry
-  install <pkg>         Install a package (stack, prompt, or runtime)
+  install <pkg>         Install a package (stack, prompt, runtime, tool, agent)
   remove <pkg>          Remove an installed package
   update [pkg]          Update packages (or all if no pkg specified)
   run <stack> [args]    Run a stack with optional arguments
-  list [kind]           List installed packages (stacks, prompts, runtimes)
+  list [kind]           List installed packages (stacks, prompts, runtimes, tools, agents)
 
   secrets set <name>    Set a secret
   secrets list          List configured secrets (masked)
@@ -53,7 +53,9 @@ EXAMPLES
 PACKAGE NAMESPACES
   stack:name           A stack (executable workflow)
   prompt:name          A prompt template
-  runtime:name         A runtime environment
+  runtime:name         A runtime interpreter (node, python, deno, bun)
+  tool:name            A utility binary (ffmpeg, imagemagick, ripgrep)
+  agent:name           An AI CLI tool (claude, codex, gemini, copilot)
 
   If no namespace is given, 'stack:' is assumed.
 `);
@@ -68,13 +70,19 @@ USAGE
   pstack search <query> [options]
 
 OPTIONS
-  --kind <type>    Filter by kind: stack, prompt, runtime
+  --stacks         Filter to stacks only
+  --prompts        Filter to prompts only
+  --runtimes       Filter to runtimes only
+  --tools          Filter to tools only
+  --agents         Filter to agents only
+  --all            List all packages (no query needed)
   --json           Output as JSON
 
 EXAMPLES
   pstack search pdf
-  pstack search deploy --kind stack
-  pstack search brainstorm --kind prompt
+  pstack search deploy --stacks
+  pstack search ffmpeg --tools
+  pstack search --all --agents
 `,
     install: `
 pstack install - Install a package
@@ -90,6 +98,8 @@ EXAMPLES
   pstack install pdf-creator
   pstack install stack:youtube-extractor
   pstack install runtime:python
+  pstack install tool:ffmpeg
+  pstack install agent:claude
 `,
     run: `
 pstack run - Execute a stack
@@ -113,7 +123,7 @@ USAGE
   pstack list [kind]
 
 ARGUMENTS
-  kind             Filter: stacks, prompts, runtimes (or: stack, prompt, runtime)
+  kind             Filter: stacks, prompts, runtimes, tools, agents
 
 OPTIONS
   --json           Output as JSON
@@ -121,7 +131,8 @@ OPTIONS
 EXAMPLES
   pstack list
   pstack list stacks
-  pstack list runtimes
+  pstack list tools
+  pstack list agents
 `,
     secrets: `
 pstack secrets - Manage secrets

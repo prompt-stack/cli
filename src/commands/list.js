@@ -13,10 +13,12 @@ export async function cmdList(args, flags) {
     if (kind === 'stacks') kind = 'stack';
     if (kind === 'prompts') kind = 'prompt';
     if (kind === 'runtimes') kind = 'runtime';
+    if (kind === 'tools') kind = 'tool';
+    if (kind === 'agents') kind = 'agent';
 
-    if (!['stack', 'prompt', 'runtime'].includes(kind)) {
+    if (!['stack', 'prompt', 'runtime', 'tool', 'agent'].includes(kind)) {
       console.error(`Invalid kind: ${kind}`);
-      console.error(`Valid kinds: stack, prompt, runtime`);
+      console.error(`Valid kinds: stack, prompt, runtime, tool, agent`);
       process.exit(1);
     }
   }
@@ -43,7 +45,9 @@ export async function cmdList(args, flags) {
     const grouped = {
       stack: packages.filter(p => p.kind === 'stack'),
       prompt: packages.filter(p => p.kind === 'prompt'),
-      runtime: packages.filter(p => p.kind === 'runtime')
+      runtime: packages.filter(p => p.kind === 'runtime'),
+      tool: packages.filter(p => p.kind === 'tool'),
+      agent: packages.filter(p => p.kind === 'agent')
     };
 
     let total = 0;

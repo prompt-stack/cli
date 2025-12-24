@@ -14,14 +14,16 @@ export async function cmdSearch(args, flags) {
 
   if (!query) {
     console.error('Usage: pstack search <query>');
-    console.error('       pstack search --all           List all available packages');
-    console.error('       pstack search --all --stacks  List all stacks');
+    console.error('       pstack search --all            List all available packages');
+    console.error('       pstack search --all --stacks   List all stacks');
     console.error('       pstack search --all --runtimes List all runtimes');
+    console.error('       pstack search --all --tools    List all tools');
+    console.error('       pstack search --all --agents   List all agents');
     console.error('Example: pstack search pdf');
     process.exit(1);
   }
 
-  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : null;
+  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : flags.tools ? 'tool' : flags.agents ? 'agent' : null;
 
   console.log(`Searching for "${query}"...`);
 
@@ -44,7 +46,9 @@ export async function cmdSearch(args, flags) {
     const grouped = {
       stack: results.filter(r => r.kind === 'stack'),
       prompt: results.filter(r => r.kind === 'prompt'),
-      runtime: results.filter(r => r.kind === 'runtime')
+      runtime: results.filter(r => r.kind === 'runtime'),
+      tool: results.filter(r => r.kind === 'tool'),
+      agent: results.filter(r => r.kind === 'agent')
     };
 
     for (const [kind, packages] of Object.entries(grouped)) {
@@ -74,12 +78,12 @@ export async function cmdSearch(args, flags) {
  * List all available packages from registry
  */
 async function listAllPackages(flags) {
-  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : null;
+  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : flags.tools ? 'tool' : flags.agents ? 'agent' : null;
 
   console.log(kind ? `Listing all ${kind}s...` : 'Listing all available packages...');
 
   try {
-    const kinds = kind ? [kind] : ['stack', 'prompt', 'runtime'];
+    const kinds = kind ? [kind] : ['stack', 'prompt', 'runtime', 'tool', 'agent'];
     let totalCount = 0;
 
     for (const k of kinds) {
