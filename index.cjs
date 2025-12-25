@@ -45,6 +45,8 @@ function ensureDirectories() {
     PATHS.stacks,
     PATHS.prompts,
     PATHS.runtimes,
+    PATHS.tools,
+    PATHS.agents,
     PATHS.store,
     PATHS.bins,
     PATHS.locks,
@@ -60,9 +62,9 @@ function ensureDirectories() {
   }
 }
 function parsePackageId(id) {
-  const match = id.match(/^(stack|prompt|runtime):(.+)$/);
+  const match = id.match(/^(stack|prompt|runtime|tool|agent):(.+)$/);
   if (!match) {
-    throw new Error(`Invalid package ID: ${id} (expected format: kind:name)`);
+    throw new Error(`Invalid package ID: ${id} (expected format: kind:name, where kind is one of: ${PACKAGE_KINDS.join(", ")})`);
   }
   return [match[1], match[2]];
 }
@@ -74,10 +76,11 @@ function getPackagePath(id) {
     case "prompt":
       return import_path.default.join(PATHS.prompts, name);
     case "runtime":
-      if (AGENT_RUNTIMES.includes(name)) {
-        return import_path.default.join(PATHS.runtimes, "agents", name);
-      }
       return import_path.default.join(PATHS.runtimes, name);
+    case "tool":
+      return import_path.default.join(PATHS.tools, name);
+    case "agent":
+      return import_path.default.join(PATHS.agents, name);
     default:
       throw new Error(`Unknown package kind: ${kind}`);
   }
@@ -90,9 +93,11 @@ function getInstalledPackages(kind) {
   const dir = {
     stack: PATHS.stacks,
     prompt: PATHS.prompts,
-    runtime: PATHS.runtimes
+    runtime: PATHS.runtimes,
+    tool: PATHS.tools,
+    agent: PATHS.agents
   }[kind];
-  if (!import_fs.default.existsSync(dir)) {
+  if (!dir || !import_fs.default.existsSync(dir)) {
     return [];
   }
   return import_fs.default.readdirSync(dir).filter((name) => {
@@ -100,7 +105,7 @@ function getInstalledPackages(kind) {
     return stat.isDirectory() && !name.startsWith(".");
   });
 }
-var import_path, import_os, import_fs, PROMPT_STACK_HOME, PATHS, AGENT_RUNTIMES;
+var import_path, import_os, import_fs, PROMPT_STACK_HOME, PATHS, PACKAGE_KINDS;
 var init_src = __esm({
   "../packages/env/src/index.js"() {
     import_path = __toESM(require("path"), 1);
@@ -116,8 +121,12 @@ var init_src = __esm({
       // Shared with Studio
       prompts: import_path.default.join(PROMPT_STACK_HOME, "prompts"),
       // Shared with Studio
-      // Runtimes - shared with Studio
+      // Runtimes (interpreters: node, python, deno, bun)
       runtimes: import_path.default.join(PROMPT_STACK_HOME, "runtimes"),
+      // Tools (utility binaries: ffmpeg, imagemagick, ripgrep, etc.)
+      tools: import_path.default.join(PROMPT_STACK_HOME, "tools"),
+      // Agents (AI CLI tools: claude, codex, gemini, copilot, ollama)
+      agents: import_path.default.join(PROMPT_STACK_HOME, "agents"),
       // Runtime binaries (content-addressed)
       store: import_path.default.join(PROMPT_STACK_HOME, "store"),
       // Shims (symlinks to store/)
@@ -137,7 +146,7 @@ var init_src = __esm({
       // Logs
       logs: import_path.default.join(PROMPT_STACK_HOME, "logs")
     };
-    AGENT_RUNTIMES = ["claude", "codex", "gemini", "copilot", "aider"];
+    PACKAGE_KINDS = ["stack", "prompt", "runtime", "tool", "agent"];
   }
 });
 
@@ -146,6 +155,7 @@ var src_exports = {};
 __export(src_exports, {
   CACHE_TTL: () => CACHE_TTL,
   DEFAULT_REGISTRY_URL: () => DEFAULT_REGISTRY_URL,
+  PACKAGE_KINDS: () => PACKAGE_KINDS2,
   RUNTIMES_DOWNLOAD_BASE: () => RUNTIMES_DOWNLOAD_BASE,
   RUNTIMES_RELEASE_VERSION: () => RUNTIMES_RELEASE_VERSION,
   checkCache: () => checkCache,
@@ -155,6 +165,7 @@ __export(src_exports, {
   downloadRuntime: () => downloadRuntime,
   fetchIndex: () => fetchIndex,
   getPackage: () => getPackage,
+  getPackageKinds: () => getPackageKinds,
   listPackages: () => listPackages,
   searchPackages: () => searchPackages,
   verifyHash: () => verifyHash
@@ -272,7 +283,7 @@ async function searchPackages(query, options = {}) {
   const index = await fetchIndex();
   const results = [];
   const queryLower = query.toLowerCase();
-  const kinds = kind ? [kind] : ["stack", "prompt", "runtime"];
+  const kinds = kind ? [kind] : PACKAGE_KINDS2;
   for (const k of kinds) {
     const section = index.packages?.[k + "s"];
     if (!section) continue;
@@ -297,13 +308,14 @@ function matchesQuery(pkg, query) {
 async function getPackage(id) {
   const index = await fetchIndex();
   const [kind, name] = id.includes(":") ? id.split(":") : [null, id];
-  const kinds = kind ? [kind] : ["stack", "prompt", "runtime"];
+  const kinds = kind ? [kind] : PACKAGE_KINDS2;
   for (const k of kinds) {
     const section = index.packages?.[k + "s"];
     if (!section) continue;
     const packages = [...section.official || [], ...section.community || []];
     for (const pkg of packages) {
-      const pkgShortId = pkg.id?.replace(/^(stack|prompt|runtime):/, "") || "";
+      const kindPrefixPattern = new RegExp(`^(${PACKAGE_KINDS2.join("|")}):`);
+      const pkgShortId = pkg.id?.replace(kindPrefixPattern, "") || "";
       if (pkgShortId === name || pkg.id === id) {
         return { ...pkg, kind: k };
       }
@@ -316,6 +328,9 @@ async function listPackages(kind) {
   const section = index.packages?.[kind + "s"];
   if (!section) return [];
   return [...section.official || [], ...section.community || []];
+}
+function getPackageKinds() {
+  return PACKAGE_KINDS2;
 }
 async function downloadPackage(pkg, destPath, options = {}) {
   const { onProgress } = options;
@@ -419,7 +434,7 @@ async function copyDirectory(src, dest) {
     }
   }
 }
-var import_fs2, import_path2, import_crypto, DEFAULT_REGISTRY_URL, RUNTIMES_DOWNLOAD_BASE, CACHE_TTL, LOCAL_REGISTRY_PATHS, RUNTIMES_RELEASE_VERSION;
+var import_fs2, import_path2, import_crypto, DEFAULT_REGISTRY_URL, RUNTIMES_DOWNLOAD_BASE, CACHE_TTL, LOCAL_REGISTRY_PATHS, PACKAGE_KINDS2, RUNTIMES_RELEASE_VERSION;
 var init_src2 = __esm({
   "../packages/registry-client/src/index.js"() {
     import_fs2 = __toESM(require("fs"), 1);
@@ -434,6 +449,7 @@ var init_src2 = __esm({
       import_path2.default.join(process.cwd(), "..", "registry", "index.json"),
       "/Users/hoff/dev/prompt-stack/registry/index.json"
     ];
+    PACKAGE_KINDS2 = ["stack", "prompt", "runtime", "tool", "agent"];
     RUNTIMES_RELEASE_VERSION = "v1.0.0";
   }
 });
@@ -14487,7 +14503,7 @@ var require_dist2 = __commonJS({
   }
 });
 
-// ../cli/src/utils/args.js
+// src/utils/args.js
 function parseArgs(argv) {
   const flags = {};
   const args = [];
@@ -14538,7 +14554,7 @@ function formatDuration(ms) {
   return `${mins}m ${secs}s`;
 }
 
-// ../cli/src/utils/help.js
+// src/utils/help.js
 function printVersion(version) {
   console.log(`pstack v${version}`);
 }
@@ -14554,13 +14570,13 @@ USAGE
   pstack <command> [options]
 
 COMMANDS
-  search <query>        Search for stacks, prompts, and runtimes
+  search <query>        Search for stacks, prompts, runtimes, tools, agents
   search --all          List all available packages in registry
-  install <pkg>         Install a package (stack, prompt, or runtime)
+  install <pkg>         Install a package (stack, prompt, runtime, tool, agent)
   remove <pkg>          Remove an installed package
   update [pkg]          Update packages (or all if no pkg specified)
   run <stack> [args]    Run a stack with optional arguments
-  list [kind]           List installed packages (stacks, prompts, runtimes)
+  list [kind]           List installed packages (stacks, prompts, runtimes, tools, agents)
 
   secrets set <name>    Set a secret
   secrets list          List configured secrets (masked)
@@ -14588,7 +14604,9 @@ EXAMPLES
 PACKAGE NAMESPACES
   stack:name           A stack (executable workflow)
   prompt:name          A prompt template
-  runtime:name         A runtime environment
+  runtime:name         A runtime interpreter (node, python, deno, bun)
+  tool:name            A utility binary (ffmpeg, imagemagick, ripgrep)
+  agent:name           An AI CLI tool (claude, codex, gemini, copilot)
 
   If no namespace is given, 'stack:' is assumed.
 `);
@@ -14602,13 +14620,19 @@ USAGE
   pstack search <query> [options]
 
 OPTIONS
-  --kind <type>    Filter by kind: stack, prompt, runtime
+  --stacks         Filter to stacks only
+  --prompts        Filter to prompts only
+  --runtimes       Filter to runtimes only
+  --tools          Filter to tools only
+  --agents         Filter to agents only
+  --all            List all packages (no query needed)
   --json           Output as JSON
 
 EXAMPLES
   pstack search pdf
-  pstack search deploy --kind stack
-  pstack search brainstorm --kind prompt
+  pstack search deploy --stacks
+  pstack search ffmpeg --tools
+  pstack search --all --agents
 `,
     install: `
 pstack install - Install a package
@@ -14624,6 +14648,8 @@ EXAMPLES
   pstack install pdf-creator
   pstack install stack:youtube-extractor
   pstack install runtime:python
+  pstack install tool:ffmpeg
+  pstack install agent:claude
 `,
     run: `
 pstack run - Execute a stack
@@ -14647,7 +14673,7 @@ USAGE
   pstack list [kind]
 
 ARGUMENTS
-  kind             Filter: stacks, prompts, runtimes (or: stack, prompt, runtime)
+  kind             Filter: stacks, prompts, runtimes, tools, agents
 
 OPTIONS
   --json           Output as JSON
@@ -14655,7 +14681,8 @@ OPTIONS
 EXAMPLES
   pstack list
   pstack list stacks
-  pstack list runtimes
+  pstack list tools
+  pstack list agents
 `,
     secrets: `
 pstack secrets - Manage secrets
@@ -14741,7 +14768,12 @@ async function resolvePackage(id) {
     entry: pkg.entry,
     installed,
     dependencies,
-    requires: pkg.requires
+    requires: pkg.requires,
+    // Install-related properties
+    npmPackage: pkg.npmPackage,
+    pipPackage: pkg.pipPackage,
+    binary: pkg.binary,
+    installDir: pkg.installDir
   };
 }
 async function resolveDependencies(pkg) {
@@ -14757,6 +14789,36 @@ async function resolveDependencies(pkg) {
         name: runtimePkg.name,
         version: runtimePkg.version,
         installed: isPackageInstalled(runtimeId),
+        dependencies: []
+      });
+    }
+  }
+  const tools = pkg.requires?.tools || [];
+  for (const tool of tools) {
+    const toolId = tool.startsWith("tool:") ? tool : `tool:${tool}`;
+    const toolPkg = await getPackage(toolId);
+    if (toolPkg) {
+      dependencies.push({
+        id: toolId,
+        kind: "tool",
+        name: toolPkg.name,
+        version: toolPkg.version,
+        installed: isPackageInstalled(toolId),
+        dependencies: []
+      });
+    }
+  }
+  const agents = pkg.requires?.agents || [];
+  for (const agent of agents) {
+    const agentId = agent.startsWith("agent:") ? agent : `agent:${agent}`;
+    const agentPkg = await getPackage(agentId);
+    if (agentPkg) {
+      dependencies.push({
+        id: agentId,
+        kind: "agent",
+        name: agentPkg.name,
+        version: agentPkg.version,
+        installed: isPackageInstalled(agentId),
         dependencies: []
       });
     }
@@ -14875,8 +14937,8 @@ async function installSinglePackage(pkg, options = {}) {
   if (import_fs4.default.existsSync(installPath) && !force) {
     return { success: true, id: pkg.id, path: installPath, skipped: true };
   }
-  if (pkg.kind === "runtime") {
-    const runtimeName = pkg.id.replace("runtime:", "");
+  if (pkg.kind === "runtime" || pkg.kind === "tool" || pkg.kind === "agent") {
+    const pkgName = pkg.id.replace(/^(runtime|tool|agent):/, "");
     onProgress?.({ phase: "downloading", package: pkg.id });
     if (pkg.npmPackage) {
       try {
@@ -14890,9 +14952,11 @@ async function installSinglePackage(pkg, options = {}) {
         }
         execSync2(`npm install ${pkg.npmPackage}`, { cwd: installPath, stdio: "pipe" });
         import_fs4.default.writeFileSync(
-          import_path4.default.join(installPath, "runtime.json"),
+          import_path4.default.join(installPath, "manifest.json"),
           JSON.stringify({
-            runtime: runtimeName,
+            id: pkg.id,
+            kind: pkg.kind,
+            name: pkgName,
             version: pkg.version || "latest",
             npmPackage: pkg.npmPackage,
             installedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -14914,9 +14978,11 @@ async function installSinglePackage(pkg, options = {}) {
         execSync2(`python3 -m venv "${installPath}/venv"`, { stdio: "pipe" });
         execSync2(`"${installPath}/venv/bin/pip" install ${pkg.pipPackage}`, { stdio: "pipe" });
         import_fs4.default.writeFileSync(
-          import_path4.default.join(installPath, "runtime.json"),
+          import_path4.default.join(installPath, "manifest.json"),
           JSON.stringify({
-            runtime: runtimeName,
+            id: pkg.id,
+            kind: pkg.kind,
+            name: pkgName,
             version: pkg.version || "latest",
             pipPackage: pkg.pipPackage,
             installedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -14931,12 +14997,12 @@ async function installSinglePackage(pkg, options = {}) {
     }
     const version = pkg.version?.replace(/\.x$/, ".0") || "1.0.0";
     try {
-      await downloadRuntime(runtimeName, version, installPath, {
+      await downloadRuntime(pkgName, version, installPath, {
         onProgress: (p) => onProgress?.({ ...p, package: pkg.id })
       });
       return { success: true, id: pkg.id, path: installPath };
     } catch (error) {
-      console.warn(`Runtime download failed: ${error.message}`);
+      console.warn(`Package download failed: ${error.message}`);
       console.warn(`Creating placeholder for ${pkg.id}`);
       if (!import_fs4.default.existsSync(installPath)) {
         import_fs4.default.mkdirSync(installPath, { recursive: true });
@@ -14945,7 +15011,7 @@ async function installSinglePackage(pkg, options = {}) {
         import_path4.default.join(installPath, "manifest.json"),
         JSON.stringify({
           id: pkg.id,
-          kind: "runtime",
+          kind: pkg.kind,
           name: pkg.name,
           version: pkg.version,
           installedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -15020,58 +15086,35 @@ async function uninstallPackage(id) {
   }
 }
 async function listInstalled(kind) {
-  const kinds = kind ? [kind] : ["stack", "prompt", "runtime"];
+  const kinds = kind ? [kind] : ["stack", "prompt", "runtime", "tool", "agent"];
   const packages = [];
   for (const k of kinds) {
     const dir = {
       stack: PATHS.stacks,
       prompt: PATHS.prompts,
-      runtime: PATHS.runtimes
+      runtime: PATHS.runtimes,
+      tool: PATHS.tools,
+      agent: PATHS.agents
     }[k];
-    if (!import_fs4.default.existsSync(dir)) continue;
+    if (!dir || !import_fs4.default.existsSync(dir)) continue;
     const entries = import_fs4.default.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-      if (k === "runtime" && entry.name === "agents") {
-        const agentsDir = import_path4.default.join(dir, "agents");
-        if (import_fs4.default.existsSync(agentsDir)) {
-          const agentEntries = import_fs4.default.readdirSync(agentsDir, { withFileTypes: true });
-          for (const agentEntry of agentEntries) {
-            if (!agentEntry.isDirectory() || agentEntry.name.startsWith(".")) continue;
-            const agentDir = import_path4.default.join(agentsDir, agentEntry.name);
-            const runtimePath2 = import_path4.default.join(agentDir, "runtime.json");
-            if (import_fs4.default.existsSync(runtimePath2)) {
-              const runtimeMeta = JSON.parse(import_fs4.default.readFileSync(runtimePath2, "utf-8"));
-              packages.push({
-                id: `runtime:${agentEntry.name}`,
-                kind: "runtime",
-                name: agentEntry.name,
-                version: runtimeMeta.version || "unknown",
-                description: `${agentEntry.name} agent`,
-                category: "agent",
-                installedAt: runtimeMeta.installedAt,
-                path: agentDir
-              });
-            }
-          }
-        }
-        continue;
-      }
       const pkgDir = import_path4.default.join(dir, entry.name);
       const manifestPath = import_path4.default.join(pkgDir, "manifest.json");
       const runtimePath = import_path4.default.join(pkgDir, "runtime.json");
       if (import_fs4.default.existsSync(manifestPath)) {
         const manifest = JSON.parse(import_fs4.default.readFileSync(manifestPath, "utf-8"));
-        packages.push(manifest);
-      } else if (k === "runtime" && import_fs4.default.existsSync(runtimePath)) {
+        packages.push({ ...manifest, kind: k, path: pkgDir });
+      } else if (import_fs4.default.existsSync(runtimePath)) {
         const runtimeMeta = JSON.parse(import_fs4.default.readFileSync(runtimePath, "utf-8"));
         packages.push({
-          id: `runtime:${entry.name}`,
-          kind: "runtime",
+          id: `${k}:${entry.name}`,
+          kind: k,
           name: entry.name,
           version: runtimeMeta.version || "unknown",
-          description: `${entry.name} runtime`,
-          installedAt: runtimeMeta.downloadedAt,
+          description: `${entry.name} ${k}`,
+          installedAt: runtimeMeta.downloadedAt || runtimeMeta.installedAt,
           path: pkgDir
         });
       }
@@ -15080,7 +15123,7 @@ async function listInstalled(kind) {
   return packages;
 }
 
-// ../cli/src/commands/search.js
+// src/commands/search.js
 async function cmdSearch(args, flags) {
   const query = args[0];
   if (flags.all || flags.a) {
@@ -15088,13 +15131,15 @@ async function cmdSearch(args, flags) {
   }
   if (!query) {
     console.error("Usage: pstack search <query>");
-    console.error("       pstack search --all           List all available packages");
-    console.error("       pstack search --all --stacks  List all stacks");
+    console.error("       pstack search --all            List all available packages");
+    console.error("       pstack search --all --stacks   List all stacks");
     console.error("       pstack search --all --runtimes List all runtimes");
+    console.error("       pstack search --all --tools    List all tools");
+    console.error("       pstack search --all --agents   List all agents");
     console.error("Example: pstack search pdf");
     process.exit(1);
   }
-  const kind = flags.stacks ? "stack" : flags.prompts ? "prompt" : flags.runtimes ? "runtime" : null;
+  const kind = flags.stacks ? "stack" : flags.prompts ? "prompt" : flags.runtimes ? "runtime" : flags.tools ? "tool" : flags.agents ? "agent" : null;
   console.log(`Searching for "${query}"...`);
   try {
     const results = await searchPackages(query, { kind });
@@ -15112,7 +15157,9 @@ Found ${results.length} package(s):
     const grouped = {
       stack: results.filter((r) => r.kind === "stack"),
       prompt: results.filter((r) => r.kind === "prompt"),
-      runtime: results.filter((r) => r.kind === "runtime")
+      runtime: results.filter((r) => r.kind === "runtime"),
+      tool: results.filter((r) => r.kind === "tool"),
+      agent: results.filter((r) => r.kind === "agent")
     };
     for (const [kind2, packages] of Object.entries(grouped)) {
       if (packages.length === 0) continue;
@@ -15134,10 +15181,10 @@ Found ${results.length} package(s):
   }
 }
 async function listAllPackages(flags) {
-  const kind = flags.stacks ? "stack" : flags.prompts ? "prompt" : flags.runtimes ? "runtime" : null;
+  const kind = flags.stacks ? "stack" : flags.prompts ? "prompt" : flags.runtimes ? "runtime" : flags.tools ? "tool" : flags.agents ? "agent" : null;
   console.log(kind ? `Listing all ${kind}s...` : "Listing all available packages...");
   try {
-    const kinds = kind ? [kind] : ["stack", "prompt", "runtime"];
+    const kinds = kind ? [kind] : ["stack", "prompt", "runtime", "tool", "agent"];
     let totalCount = 0;
     for (const k of kinds) {
       const packages = await listPackages(k);
@@ -15162,7 +15209,7 @@ Total: ${totalCount} package(s) available`);
   }
 }
 
-// ../cli/src/commands/install.js
+// src/commands/install.js
 async function cmdInstall(args, flags) {
   const pkgId = args[0];
   if (!pkgId) {
@@ -15717,7 +15764,7 @@ var validateStackInternal = ajv.compile(stackSchema);
 var validatePromptInternal = ajv.compile(promptSchema);
 var validateRuntimeInternal = ajv.compile(runtimeSchema);
 
-// ../cli/src/commands/run.js
+// src/commands/run.js
 var import_fs8 = __toESM(require("fs"), 1);
 var import_path8 = __toESM(require("path"), 1);
 async function cmdRun(args, flags) {
@@ -15810,16 +15857,18 @@ function formatDuration2(ms) {
   return `${mins}m ${secs}s`;
 }
 
-// ../cli/src/commands/list.js
+// src/commands/list.js
 async function cmdList(args, flags) {
   let kind = args[0];
   if (kind) {
     if (kind === "stacks") kind = "stack";
     if (kind === "prompts") kind = "prompt";
     if (kind === "runtimes") kind = "runtime";
-    if (!["stack", "prompt", "runtime"].includes(kind)) {
+    if (kind === "tools") kind = "tool";
+    if (kind === "agents") kind = "agent";
+    if (!["stack", "prompt", "runtime", "tool", "agent"].includes(kind)) {
       console.error(`Invalid kind: ${kind}`);
-      console.error(`Valid kinds: stack, prompt, runtime`);
+      console.error(`Valid kinds: stack, prompt, runtime, tool, agent`);
       process.exit(1);
     }
   }
@@ -15842,7 +15891,9 @@ Install with: pstack install <package>`);
     const grouped = {
       stack: packages.filter((p) => p.kind === "stack"),
       prompt: packages.filter((p) => p.kind === "prompt"),
-      runtime: packages.filter((p) => p.kind === "runtime")
+      runtime: packages.filter((p) => p.kind === "runtime"),
+      tool: packages.filter((p) => p.kind === "tool"),
+      agent: packages.filter((p) => p.kind === "agent")
     };
     let total = 0;
     for (const [pkgKind, pkgs] of Object.entries(grouped)) {
@@ -15871,7 +15922,7 @@ Total: ${total} package(s)`);
   }
 }
 
-// ../cli/src/commands/remove.js
+// src/commands/remove.js
 async function cmdRemove(args, flags) {
   const pkgId = args[0];
   if (!pkgId) {
@@ -15904,7 +15955,7 @@ async function cmdRemove(args, flags) {
   }
 }
 
-// ../cli/src/commands/secrets.js
+// src/commands/secrets.js
 var import_readline = __toESM(require("readline"), 1);
 async function cmdSecrets(args, flags) {
   const subcommand = args[0];
@@ -16236,13 +16287,13 @@ CREATE INDEX IF NOT EXISTS idx_model_pricing_provider ON model_pricing(provider)
 CREATE INDEX IF NOT EXISTS idx_model_pricing_pattern ON model_pricing(model_pattern);
 
 -- =============================================================================
--- PACKAGES (stacks, prompts, runtimes)
+-- PACKAGES (stacks, prompts, runtimes, tools, agents)
 -- =============================================================================
 
 -- Installed packages
 CREATE TABLE IF NOT EXISTS packages (
-  id TEXT PRIMARY KEY,              -- e.g., 'stack:pdf-creator'
-  kind TEXT NOT NULL CHECK (kind IN ('stack', 'prompt', 'runtime')),
+  id TEXT PRIMARY KEY,              -- e.g., 'stack:pdf-creator', 'tool:ffmpeg', 'agent:claude'
+  kind TEXT NOT NULL CHECK (kind IN ('stack', 'prompt', 'runtime', 'tool', 'agent')),
   name TEXT NOT NULL,
   version TEXT NOT NULL,
   description TEXT,
@@ -16400,7 +16451,7 @@ function runMigrations(db2, from, to) {
       db3.exec(`
         CREATE TABLE IF NOT EXISTS packages (
           id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL CHECK (kind IN ('stack', 'prompt', 'runtime')),
+          kind TEXT NOT NULL CHECK (kind IN ('stack', 'prompt', 'runtime', 'tool', 'agent')),
           name TEXT NOT NULL,
           version TEXT NOT NULL,
           description TEXT,
@@ -16767,7 +16818,7 @@ function getDbSize() {
   }
 }
 
-// ../cli/src/commands/db.js
+// src/commands/db.js
 async function cmdDb(args, flags) {
   const subcommand = args[0];
   switch (subcommand) {
@@ -16924,7 +16975,7 @@ function stripHighlight(str) {
   return str.replace(/>>>/g, "").replace(/<<</g, "");
 }
 
-// ../cli/src/commands/doctor.js
+// src/commands/doctor.js
 var import_fs10 = __toESM(require("fs"), 1);
 async function cmdDoctor(args, flags) {
   console.log("Prompt Stack Health Check");
@@ -17016,7 +17067,7 @@ async function cmdDoctor(args, flags) {
   }
 }
 
-// ../cli/src/commands/update.js
+// src/commands/update.js
 var import_fs11 = __toESM(require("fs"), 1);
 var import_path10 = __toESM(require("path"), 1);
 var import_child_process2 = require("child_process");
@@ -17152,7 +17203,7 @@ function updateRuntimeMetadata(installPath, updates) {
   }
 }
 
-// ../cli/src/index.js
+// src/index.js
 var VERSION = "2.0.0";
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));

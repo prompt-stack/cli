@@ -16,7 +16,8 @@
   "dependencies": {
     "@prompt-stack/core": "workspace:*",
     "@prompt-stack/manifest": "workspace:*",
-    "@prompt-stack/runner": "workspace:*"
+    "@prompt-stack/runner": "workspace:*",
+    "better-sqlite3": "^11.0.0"
   },
   "devDependencies": {},
   "engines": {

@@ -3,10 +3,10 @@
  * Uses better-sqlite3 for synchronous, fast SQLite access
  */
 
-const Database = require('better-sqlite3');
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
+import Database from 'better-sqlite3';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
 
 const PROMPT_STACK_HOME = path.join(os.homedir(), '.prompt-stack');
 const DB_PATH = path.join(PROMPT_STACK_HOME, 'prompt-stack.db');
@@ -96,7 +96,7 @@ function getDbSize() {
   }
 }
 
-module.exports = {
+export {
   getDb,
   closeDb,
   isDatabaseInitialized,

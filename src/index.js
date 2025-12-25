@@ -13,6 +13,7 @@
  *   pstack secrets <cmd>       Manage secrets
  *   pstack runtimes <cmd>      Manage runtimes
  *   pstack db <cmd>            Database operations
+ *   pstack logs [options]      Query observability logs
  *   pstack doctor              Health check
  */
 
@@ -29,6 +30,7 @@ import { cmdSecrets } from './commands/secrets.js';
 import { cmdDb } from './commands/db.js';
 import { cmdDoctor } from './commands/doctor.js';
 import { cmdUpdate } from './commands/update.js';
+import { cmdLogs } from './commands/logs.js';
 
 const VERSION = '2.0.0';
 
@@ -92,6 +94,10 @@ async function main() {
       case 'update':
       case 'upgrade':
         await cmdUpdate(args, flags);
+        break;
+
+      case 'logs':
+        await cmdLogs(args, flags);
         break;
 
       case 'help':

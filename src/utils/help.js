@@ -34,6 +34,8 @@ COMMANDS
   db stats              Show database statistics
   db search <query>     Search conversation history
 
+  logs [options]        Query agent visibility logs
+
   doctor                Check system health and configuration
 
 OPTIONS
@@ -181,6 +183,50 @@ CHECKS
   - Installed packages
   - Required runtimes
   - Secrets configuration
+`,
+    logs: `
+pstack logs - Query agent visibility logs
+
+USAGE
+  pstack logs [options]
+
+FILTERS
+  --limit <n>           Number of logs to show (default: 50)
+  --last <time>         Show logs from last N time (5m, 1h, 30s, 2d)
+  --since <timestamp>   Show logs since timestamp (ISO or epoch ms)
+  --until <timestamp>   Show logs until timestamp (ISO or epoch ms)
+  --filter <text>       Search for text in log messages (repeatable)
+  --source <source>     Filter by source (e.g., ipc, console, agent-codex)
+  --level <level>       Filter by level (debug, info, warn, error)
+  --type <type>         Filter by event type (ipc, window, navigation, error, custom)
+  --provider <provider> Filter by provider (claude, codex, gemini)
+  --session-id <id>     Filter by session ID
+  --terminal-id <id>    Filter by terminal ID
+
+PERFORMANCE
+  --slow-only           Show only slow operations
+  --slow-threshold <ms> Minimum duration for slow operations (default: 1000)
+
+SPECIAL MODES
+  --before-crash        Show last 30 seconds before crash
+  --stats               Show statistics summary
+
+EXPORT
+  --export <file>       Export logs to file
+  --format <format>     Export format: json, ndjson, csv (default: json)
+
+OUTPUT
+  --verbose             Show detailed event information
+  --json                Output events as JSON lines
+
+EXAMPLES
+  pstack logs --last 5m
+  pstack logs --level error --last 1h
+  pstack logs --filter "authentication" --provider claude
+  pstack logs --slow-only --slow-threshold 2000
+  pstack logs --stats --last 24h
+  pstack logs --export debug.json --format ndjson --last 30m
+  pstack logs --before-crash
 `
   };
 

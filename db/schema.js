@@ -2,9 +2,9 @@
  * Database schema definitions and migrations
  */
 
-const { getDb } = require('./index');
+import { getDb } from './index.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_SQL = `
 -- Schema version tracking
@@ -181,6 +181,33 @@ CREATE TABLE IF NOT EXISTS model_pricing (
 
 CREATE INDEX IF NOT EXISTS idx_model_pricing_provider ON model_pricing(provider);
 CREATE INDEX IF NOT EXISTS idx_model_pricing_pattern ON model_pricing(model_pattern);
+
+-- Observability logs (agent visibility events)
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
+  type TEXT NOT NULL,
+  provider TEXT,
+  cid TEXT,
+  session_id TEXT,
+  terminal_id INTEGER,
+  feature TEXT,
+  step TEXT,
+  duration_ms INTEGER,
+  data_json TEXT NOT NULL,
+
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source);
+CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
+CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type);
+CREATE INDEX IF NOT EXISTS idx_logs_provider ON logs(provider);
+CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_logs_duration ON logs(duration_ms) WHERE duration_ms IS NOT NULL;
 `;
 
 /**
@@ -251,6 +278,35 @@ function runMigrations(db, from, to) {
       `);
       // Seed initial pricing data
       seedModelPricing(db);
+    },
+    // Version 3: Add observability logs table
+    3: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
+          type TEXT NOT NULL,
+          provider TEXT,
+          cid TEXT,
+          session_id TEXT,
+          terminal_id INTEGER,
+          feature TEXT,
+          step TEXT,
+          duration_ms INTEGER,
+          data_json TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source);
+        CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
+        CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type);
+        CREATE INDEX IF NOT EXISTS idx_logs_provider ON logs(provider);
+        CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id);
+        CREATE INDEX IF NOT EXISTS idx_logs_duration ON logs(duration_ms) WHERE duration_ms IS NOT NULL;
+      `);
+      console.log('  Added observability logs table');
     }
   };
 
@@ -411,7 +467,7 @@ function calculateCostFromPricing(provider, model, usage) {
   return inputCost + outputCost + cacheReadCost;
 }
 
-module.exports = {
+export {
   initSchema,
   getSchemaVersion,
   getTableNames,
