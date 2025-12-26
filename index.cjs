@@ -135,9 +135,9 @@ var init_src = __esm({
       locks: import_path.default.join(PROMPT_STACK_HOME, "locks"),
       // Secrets (OS Keychain preferred, encrypted file fallback)
       vault: import_path.default.join(PROMPT_STACK_HOME, "vault"),
-      // Database
-      db: import_path.default.join(PROMPT_STACK_HOME, "db"),
-      dbFile: import_path.default.join(PROMPT_STACK_HOME, "db", "pstack.db"),
+      // Database (shared with Studio)
+      db: PROMPT_STACK_HOME,
+      dbFile: import_path.default.join(PROMPT_STACK_HOME, "prompt-stack.db"),
       // Cache
       cache: import_path.default.join(PROMPT_STACK_HOME, "cache"),
       registryCache: import_path.default.join(PROMPT_STACK_HOME, "cache", "registry.json"),
@@ -531,17 +531,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path11) {
-      const ctrl = callVisitor(key, node, visitor, path11);
+    function visit_(key, node, visitor, path12) {
+      const ctrl = callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visit_(key, ctrl, visitor, path11);
+        replaceNode(key, path12, ctrl);
+        return visit_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path11);
+            const ci = visit_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -552,13 +552,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = visit_("key", node.key, visitor, path11);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = visit_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path11);
+          const cv = visit_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -579,17 +579,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path11) {
-      const ctrl = await callVisitor(key, node, visitor, path11);
+    async function visitAsync_(key, node, visitor, path12) {
+      const ctrl = await callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visitAsync_(key, ctrl, visitor, path11);
+        replaceNode(key, path12, ctrl);
+        return visitAsync_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path11);
+            const ci = await visitAsync_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -600,13 +600,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path11);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path11);
+          const cv = await visitAsync_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -633,23 +633,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path11) {
+    function callVisitor(key, node, visitor, path12) {
       if (typeof visitor === "function")
-        return visitor(key, node, path11);
+        return visitor(key, node, path12);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path11);
+        return visitor.Map?.(key, node, path12);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path11);
+        return visitor.Seq?.(key, node, path12);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path11);
+        return visitor.Pair?.(key, node, path12);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path11);
+        return visitor.Scalar?.(key, node, path12);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path11);
+        return visitor.Alias?.(key, node, path12);
       return void 0;
     }
-    function replaceNode(key, path11, node) {
-      const parent = path11[path11.length - 1];
+    function replaceNode(key, path12, node) {
+      const parent = path12[path12.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -1257,10 +1257,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path11, value) {
+    function collectionFromPath(schema, path12, value) {
       let v = value;
-      for (let i = path11.length - 1; i >= 0; --i) {
-        const k = path11[i];
+      for (let i = path12.length - 1; i >= 0; --i) {
+        const k = path12[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -1279,7 +1279,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path11) => path11 == null || typeof path11 === "object" && !!path11[Symbol.iterator]().next().done;
+    var isEmptyPath = (path12) => path12 == null || typeof path12 === "object" && !!path12[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -1309,11 +1309,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path11, value) {
-        if (isEmptyPath(path11))
+      addIn(path12, value) {
+        if (isEmptyPath(path12))
           this.add(value);
         else {
-          const [key, ...rest] = path11;
+          const [key, ...rest] = path12;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -1327,8 +1327,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        const [key, ...rest] = path11;
+      deleteIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -1342,8 +1342,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        const [key, ...rest] = path11;
+      getIn(path12, keepScalar) {
+        const [key, ...rest] = path12;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -1361,8 +1361,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path11) {
-        const [key, ...rest] = path11;
+      hasIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -1372,8 +1372,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        const [key, ...rest] = path11;
+      setIn(path12, value) {
+        const [key, ...rest] = path12;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3877,9 +3877,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path11, value) {
+      addIn(path12, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path11, value);
+          this.contents.addIn(path12, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3954,14 +3954,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        if (Collection.isEmptyPath(path11)) {
+      deleteIn(path12) {
+        if (Collection.isEmptyPath(path12)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path11) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path12) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3976,10 +3976,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        if (Collection.isEmptyPath(path11))
+      getIn(path12, keepScalar) {
+        if (Collection.isEmptyPath(path12))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path11, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path12, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3990,10 +3990,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path11) {
-        if (Collection.isEmptyPath(path11))
+      hasIn(path12) {
+        if (Collection.isEmptyPath(path12))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path11) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path12) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -4010,13 +4010,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        if (Collection.isEmptyPath(path11)) {
+      setIn(path12, value) {
+        if (Collection.isEmptyPath(path12)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path11), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path12), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path11, value);
+          this.contents.setIn(path12, value);
         }
       }
       /**
@@ -5968,9 +5968,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path11) => {
+    visit.itemAtPath = (cst, path12) => {
       let item = cst;
-      for (const [field, index] of path11) {
+      for (const [field, index] of path12) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5979,23 +5979,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path11) => {
-      const parent = visit.itemAtPath(cst, path11.slice(0, -1));
-      const field = path11[path11.length - 1][0];
+    visit.parentCollection = (cst, path12) => {
+      const parent = visit.itemAtPath(cst, path12.slice(0, -1));
+      const field = path12[path12.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path11, item, visitor) {
-      let ctrl = visitor(item, path11);
+    function _visit(path12, item, visitor) {
+      let ctrl = visitor(item, path12);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path11.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path12.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -6006,10 +6006,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path11);
+            ctrl = ctrl(item, path12);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path11) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path12) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -7294,14 +7294,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs12 = this.flowScalar(this.type);
+              const fs14 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs12, sep: [] });
+                map.items.push({ start, key: fs14, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs12);
+                this.stack.push(fs14);
               } else {
-                Object.assign(it, { key: fs12, sep: [] });
+                Object.assign(it, { key: fs14, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7429,13 +7429,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs12 = this.flowScalar(this.type);
+              const fs14 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs12, sep: [] });
+                fc.items.push({ start: [], key: fs14, sep: [] });
               else if (it.sep)
-                this.stack.push(fs12);
+                this.stack.push(fs14);
               else
-                Object.assign(it, { key: fs12, sep: [] });
+                Object.assign(it, { key: fs14, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -10936,8 +10936,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path11) {
-      let input = path11;
+    function removeDotSegments(path12) {
+      let input = path12;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -11136,8 +11136,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path11, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
+        const [path12, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -14490,12 +14490,12 @@ var require_dist2 = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats2(ajv2, list, fs12, exportName) {
+    function addFormats2(ajv2, list, fs14, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv2.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv2.addFormat(f, fs12[f]);
+        ajv2.addFormat(f, fs14[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -14584,6 +14584,8 @@ COMMANDS
 
   db stats              Show database statistics
   db search <query>     Search conversation history
+
+  logs [options]        Query agent visibility logs
 
   doctor                Check system health and configuration
 
@@ -14731,6 +14733,50 @@ CHECKS
   - Installed packages
   - Required runtimes
   - Secrets configuration
+`,
+    logs: `
+pstack logs - Query agent visibility logs
+
+USAGE
+  pstack logs [options]
+
+FILTERS
+  --limit <n>           Number of logs to show (default: 50)
+  --last <time>         Show logs from last N time (5m, 1h, 30s, 2d)
+  --since <timestamp>   Show logs since timestamp (ISO or epoch ms)
+  --until <timestamp>   Show logs until timestamp (ISO or epoch ms)
+  --filter <text>       Search for text in log messages (repeatable)
+  --source <source>     Filter by source (e.g., ipc, console, agent-codex)
+  --level <level>       Filter by level (debug, info, warn, error)
+  --type <type>         Filter by event type (ipc, window, navigation, error, custom)
+  --provider <provider> Filter by provider (claude, codex, gemini)
+  --session-id <id>     Filter by session ID
+  --terminal-id <id>    Filter by terminal ID
+
+PERFORMANCE
+  --slow-only           Show only slow operations
+  --slow-threshold <ms> Minimum duration for slow operations (default: 1000)
+
+SPECIAL MODES
+  --before-crash        Show last 30 seconds before crash
+  --stats               Show statistics summary
+
+EXPORT
+  --export <file>       Export logs to file
+  --format <format>     Export format: json, ndjson, csv (default: json)
+
+OUTPUT
+  --verbose             Show detailed event information
+  --json                Output events as JSON lines
+
+EXAMPLES
+  pstack logs --last 5m
+  pstack logs --level error --last 1h
+  pstack logs --filter "authentication" --provider claude
+  pstack logs --slow-only --slow-threshold 2000
+  pstack logs --stats --last 24h
+  pstack logs --export debug.json --format ndjson --last 30m
+  pstack logs --before-crash
 `
   };
   if (help[command]) {
@@ -15398,11 +15444,11 @@ async function runStack(id, options = {}) {
   const startTime = Date.now();
   const packagePath = getPackagePath(id);
   const manifestPath = import_path6.default.join(packagePath, "manifest.json");
-  const { default: fs12 } = await import("fs");
-  if (!fs12.existsSync(manifestPath)) {
+  const { default: fs14 } = await import("fs");
+  if (!fs14.existsSync(manifestPath)) {
     throw new Error(`Stack manifest not found: ${id}`);
   }
-  const manifest = JSON.parse(fs12.readFileSync(manifestPath, "utf-8"));
+  const manifest = JSON.parse(fs14.readFileSync(manifestPath, "utf-8"));
   const entry = manifest.entry || "index.js";
   const entryPath = import_path6.default.join(packagePath, entry);
   const runtime = manifest.runtime || "runtime:node";
@@ -16402,31 +16448,31 @@ CREATE TABLE IF NOT EXISTS secrets_meta (
 );
 `;
 function initSchema() {
-  const db2 = getDb();
-  const hasVersionTable = db2.prepare(`
+  const db3 = getDb();
+  const hasVersionTable = db3.prepare(`
     SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'
   `).get();
   if (!hasVersionTable) {
     console.log("Initializing database schema...");
-    db2.exec(SCHEMA_SQL);
-    db2.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(SCHEMA_VERSION, (/* @__PURE__ */ new Date()).toISOString());
-    seedModelPricing(db2);
+    db3.exec(SCHEMA_SQL);
+    db3.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(SCHEMA_VERSION, (/* @__PURE__ */ new Date()).toISOString());
+    seedModelPricing(db3);
     console.log(`Database initialized at schema version ${SCHEMA_VERSION}`);
     return { version: SCHEMA_VERSION, migrated: false };
   }
-  const currentVersion = db2.prepare("SELECT MAX(version) as v FROM schema_version").get().v || 0;
+  const currentVersion = db3.prepare("SELECT MAX(version) as v FROM schema_version").get().v || 0;
   if (currentVersion < SCHEMA_VERSION) {
-    runMigrations(db2, currentVersion, SCHEMA_VERSION);
+    runMigrations(db3, currentVersion, SCHEMA_VERSION);
     return { version: SCHEMA_VERSION, migrated: true, from: currentVersion };
   }
   return { version: currentVersion, migrated: false };
 }
-function runMigrations(db2, from, to) {
+function runMigrations(db3, from, to) {
   console.log(`Migrating database from v${from} to v${to}...`);
   const migrations = {
     // Version 2: Add model_pricing table
-    2: (db3) => {
-      db3.exec(`
+    2: (db4) => {
+      db4.exec(`
         CREATE TABLE IF NOT EXISTS model_pricing (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           provider TEXT NOT NULL CHECK (provider IN ('claude', 'codex', 'gemini', 'openai', 'ollama')),
@@ -16444,11 +16490,11 @@ function runMigrations(db2, from, to) {
         CREATE INDEX IF NOT EXISTS idx_model_pricing_provider ON model_pricing(provider);
         CREATE INDEX IF NOT EXISTS idx_model_pricing_pattern ON model_pricing(model_pattern);
       `);
-      seedModelPricing(db3);
+      seedModelPricing(db4);
     },
     // Version 3: Add packages, runs, artifacts, lockfiles, secrets_meta tables
-    3: (db3) => {
-      db3.exec(`
+    3: (db4) => {
+      db4.exec(`
         CREATE TABLE IF NOT EXISTS packages (
           id TEXT PRIMARY KEY,
           kind TEXT NOT NULL CHECK (kind IN ('stack', 'prompt', 'runtime', 'tool', 'agent')),
@@ -16528,16 +16574,16 @@ function runMigrations(db2, from, to) {
   for (let v = from + 1; v <= to; v++) {
     if (migrations[v]) {
       console.log(`  Applying migration v${v}...`);
-      db2.transaction(() => {
-        migrations[v](db2);
-        db2.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(v, (/* @__PURE__ */ new Date()).toISOString());
+      db3.transaction(() => {
+        migrations[v](db3);
+        db3.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(v, (/* @__PURE__ */ new Date()).toISOString());
       })();
     }
   }
   console.log("Migrations complete.");
 }
-function seedModelPricing(db2) {
-  const insert = db2.prepare(`
+function seedModelPricing(db3) {
+  const insert = db3.prepare(`
     INSERT OR REPLACE INTO model_pricing
     (provider, model_pattern, display_name, input_cost_per_mtok, output_cost_per_mtok, cache_read_cost_per_mtok, cache_write_cost_per_mtok, effective_from, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -16579,7 +16625,7 @@ function seedModelPricing(db2) {
 // ../packages/db/src/search.js
 function search(query, options = {}) {
   const { limit = 20, provider, sessionId, offset = 0 } = options;
-  const db2 = getDb();
+  const db3 = getDb();
   const ftsQuery = prepareFtsQuery(query);
   let sql = `
     SELECT
@@ -16613,7 +16659,7 @@ function search(query, options = {}) {
   sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
   params.push(limit, offset);
   try {
-    return db2.prepare(sql).all(...params);
+    return db3.prepare(sql).all(...params);
   } catch (err) {
     return searchFallback(query, options);
   }
@@ -16631,7 +16677,7 @@ function prepareFtsQuery(query) {
 }
 function searchFallback(query, options = {}) {
   const { limit = 20, provider, sessionId, offset = 0 } = options;
-  const db2 = getDb();
+  const db3 = getDb();
   let sql = `
     SELECT
       t.id,
@@ -16660,13 +16706,13 @@ function searchFallback(query, options = {}) {
   }
   sql += ` ORDER BY t.ts DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
-  return db2.prepare(sql).all(...params);
+  return db3.prepare(sql).all(...params);
 }
 
 // ../packages/db/src/stats.js
 function getStats() {
-  const db2 = getDb();
-  const totals = db2.prepare(`
+  const db3 = getDb();
+  const totals = db3.prepare(`
     SELECT
       COUNT(*) as total_sessions,
       SUM(turn_count) as total_turns,
@@ -16677,7 +16723,7 @@ function getStats() {
     FROM sessions
     WHERE status != 'deleted'
   `).get();
-  const byProvider = db2.prepare(`
+  const byProvider = db3.prepare(`
     SELECT
       provider,
       COUNT(*) as sessions,
@@ -16690,7 +16736,7 @@ function getStats() {
     GROUP BY provider
     ORDER BY cost DESC
   `).all();
-  const byModel = db2.prepare(`
+  const byModel = db3.prepare(`
     SELECT
       model,
       COUNT(*) as turns,
@@ -16703,7 +16749,7 @@ function getStats() {
     ORDER BY cost DESC
     LIMIT 10
   `).all();
-  const recentActivity = db2.prepare(`
+  const recentActivity = db3.prepare(`
     SELECT
       DATE(last_active_at) as date,
       COUNT(*) as sessions,
@@ -16715,7 +16761,7 @@ function getStats() {
     GROUP BY DATE(last_active_at)
     ORDER BY date DESC
   `).all();
-  const topSessions = db2.prepare(`
+  const topSessions = db3.prepare(`
     SELECT
       id,
       title,
@@ -16728,7 +16774,7 @@ function getStats() {
     ORDER BY turn_count DESC
     LIMIT 10
   `).all();
-  const toolsUsage = getToolsUsage(db2);
+  const toolsUsage = getToolsUsage(db3);
   return {
     totalSessions: totals.total_sessions || 0,
     totalTurns: totals.total_turns || 0,
@@ -16752,9 +16798,9 @@ function getStats() {
     toolsUsage
   };
 }
-function getToolsUsage(db2) {
-  if (!db2) db2 = getDb();
-  const turns = db2.prepare(`
+function getToolsUsage(db3) {
+  if (!db3) db3 = getDb();
+  const turns = db3.prepare(`
     SELECT tools_used FROM turns WHERE tools_used IS NOT NULL
   `).all();
   const toolCounts = {};
@@ -17203,6 +17249,400 @@ function updateRuntimeMetadata(installPath, updates) {
   }
 }
 
+// db/index.js
+var import_better_sqlite32 = __toESM(require("better-sqlite3"), 1);
+var import_path11 = __toESM(require("path"), 1);
+var import_os3 = __toESM(require("os"), 1);
+var import_fs12 = __toESM(require("fs"), 1);
+var PROMPT_STACK_HOME3 = import_path11.default.join(import_os3.default.homedir(), ".prompt-stack");
+var DB_PATH2 = import_path11.default.join(PROMPT_STACK_HOME3, "prompt-stack.db");
+var db2 = null;
+function getDb2(options = {}) {
+  if (!db2) {
+    if (!import_fs12.default.existsSync(PROMPT_STACK_HOME3)) {
+      import_fs12.default.mkdirSync(PROMPT_STACK_HOME3, { recursive: true });
+    }
+    db2 = new import_better_sqlite32.default(DB_PATH2, {
+      readonly: options.readonly || false
+    });
+    db2.pragma("journal_mode = WAL");
+    db2.pragma("foreign_keys = ON");
+    db2.pragma("synchronous = NORMAL");
+    db2.pragma("cache_size = -64000");
+  }
+  return db2;
+}
+
+// db/logs.js
+function queryLogs(options = {}) {
+  const db3 = getDb2();
+  const {
+    limit = 50,
+    offset = 0,
+    since,
+    until,
+    source,
+    level,
+    type,
+    provider,
+    sessionId,
+    terminalId,
+    search: search2,
+    slowOnly = false,
+    slowThreshold = 1e3
+  } = options;
+  let query = "SELECT * FROM logs WHERE 1=1";
+  const params = [];
+  if (since) {
+    query += " AND timestamp >= ?";
+    params.push(since);
+  }
+  if (until) {
+    query += " AND timestamp <= ?";
+    params.push(until);
+  }
+  if (source) {
+    query += " AND source = ?";
+    params.push(source);
+  }
+  if (level) {
+    query += " AND level = ?";
+    params.push(level);
+  }
+  if (type) {
+    query += " AND type = ?";
+    params.push(type);
+  }
+  if (provider) {
+    query += " AND provider = ?";
+    params.push(provider);
+  }
+  if (sessionId) {
+    query += " AND session_id = ?";
+    params.push(sessionId);
+  }
+  if (terminalId !== void 0) {
+    query += " AND terminal_id = ?";
+    params.push(terminalId);
+  }
+  if (search2) {
+    query += " AND data_json LIKE ?";
+    params.push(`%${search2}%`);
+  }
+  if (slowOnly) {
+    query += " AND duration_ms >= ?";
+    params.push(slowThreshold);
+  }
+  query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+  return db3.prepare(query).all(...params);
+}
+function getLogStats(options = {}) {
+  const db3 = getDb2();
+  const { since, until, search: search2 } = options;
+  let whereClause = "1=1";
+  const params = [];
+  if (since) {
+    whereClause += " AND timestamp >= ?";
+    params.push(since);
+  }
+  if (until) {
+    whereClause += " AND timestamp <= ?";
+    params.push(until);
+  }
+  if (search2) {
+    whereClause += " AND data_json LIKE ?";
+    params.push(`%${search2}%`);
+  }
+  const total = db3.prepare(`SELECT COUNT(*) as count FROM logs WHERE ${whereClause}`).get(...params);
+  const bySource = db3.prepare(`
+    SELECT source, COUNT(*) as count
+    FROM logs
+    WHERE ${whereClause}
+    GROUP BY source
+    ORDER BY count DESC
+  `).all(...params);
+  const byLevel = db3.prepare(`
+    SELECT level, COUNT(*) as count
+    FROM logs
+    WHERE ${whereClause}
+    GROUP BY level
+    ORDER BY
+      CASE level
+        WHEN 'error' THEN 1
+        WHEN 'warn' THEN 2
+        WHEN 'info' THEN 3
+        WHEN 'debug' THEN 4
+      END
+  `).all(...params);
+  const byProvider = db3.prepare(`
+    SELECT provider, COUNT(*) as count
+    FROM logs
+    WHERE ${whereClause} AND provider IS NOT NULL
+    GROUP BY provider
+    ORDER BY count DESC
+  `).all(...params);
+  const slowest = db3.prepare(`
+    SELECT type, source,
+      AVG(duration_ms) as avg_duration,
+      MAX(duration_ms) as max_duration,
+      MIN(duration_ms) as min_duration,
+      COUNT(*) as count
+    FROM logs
+    WHERE ${whereClause} AND duration_ms IS NOT NULL
+    GROUP BY type, source
+    HAVING count >= 3
+    ORDER BY avg_duration DESC
+    LIMIT 10
+  `).all(...params);
+  return {
+    total: total.count,
+    bySource: bySource.reduce((acc, r) => ({ ...acc, [r.source]: r.count }), {}),
+    byLevel: byLevel.reduce((acc, r) => ({ ...acc, [r.level]: r.count }), {}),
+    byProvider: byProvider.reduce((acc, r) => ({ ...acc, [r.provider]: r.count }), {}),
+    slowest: slowest.map((r) => ({
+      operation: `${r.source}:${r.type}`,
+      avgMs: Math.round(r.avg_duration),
+      maxMs: r.max_duration,
+      minMs: r.min_duration,
+      count: r.count
+    }))
+  };
+}
+function getRecentLogs(ms = 6e4) {
+  const since = Date.now() - ms;
+  return queryLogs({ since, limit: 100 });
+}
+function getBeforeCrashLogs() {
+  return getRecentLogs(3e4);
+}
+
+// src/commands/logs.js
+var import_fs13 = __toESM(require("fs"), 1);
+function parseTimeAgo(str) {
+  const match = str.match(/^(\d+)([smhd])$/);
+  if (!match) return null;
+  const [, num, unit] = match;
+  const value = parseInt(num);
+  const multipliers = {
+    s: 1e3,
+    m: 60 * 1e3,
+    h: 60 * 60 * 1e3,
+    d: 24 * 60 * 60 * 1e3
+  };
+  return value * multipliers[unit];
+}
+function parseTimestamp(str) {
+  if (!str) return null;
+  const relative = parseTimeAgo(str);
+  if (relative) {
+    return Date.now() - relative;
+  }
+  const date = new Date(str);
+  if (!isNaN(date.getTime())) {
+    return date.getTime();
+  }
+  return null;
+}
+function formatTimestamp(ts) {
+  const date = new Date(ts);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+function formatLogEvent(event, options = {}) {
+  const { verbose = false, json = false } = options;
+  if (json) {
+    const parsed2 = JSON.parse(event.data_json);
+    return JSON.stringify({
+      timestamp: event.timestamp,
+      source: event.source,
+      level: event.level,
+      type: event.type,
+      ...parsed2
+    });
+  }
+  const time = formatTimestamp(event.timestamp);
+  const source = event.source.padEnd(10);
+  const level = event.level.toUpperCase().padEnd(5);
+  const parsed = JSON.parse(event.data_json);
+  const message = parsed.message || parsed.channel || event.type;
+  let output = `\x1B[90m${time}\x1B[0m \x1B[36m[${source}]\x1B[0m ${message}`;
+  if (event.duration_ms) {
+    output += ` \x1B[33m(${event.duration_ms}ms)\x1B[0m`;
+  }
+  if (verbose) {
+    output += `
+  Type: ${event.type}`;
+    if (event.provider) output += ` | Provider: ${event.provider}`;
+    if (event.cid) output += ` | CID: ${event.cid}`;
+  }
+  return output;
+}
+function exportLogs(logs, filepath, format) {
+  let content;
+  switch (format) {
+    case "ndjson":
+      content = logs.map((e) => {
+        const parsed = JSON.parse(e.data_json);
+        return JSON.stringify({
+          timestamp: e.timestamp,
+          source: e.source,
+          level: e.level,
+          type: e.type,
+          ...parsed
+        });
+      }).join("\n");
+      break;
+    case "csv":
+      const headers = "timestamp,source,level,type,message,duration_ms\n";
+      const rows = logs.map((e) => {
+        const parsed = JSON.parse(e.data_json);
+        const message = (parsed.message || parsed.channel || e.type).replace(/"/g, '""');
+        return `${e.timestamp},${e.source},${e.level},${e.type},"${message}",${e.duration_ms || ""}`;
+      }).join("\n");
+      content = headers + rows;
+      break;
+    case "json":
+    default:
+      const formatted = logs.map((e) => {
+        const parsed = JSON.parse(e.data_json);
+        return {
+          timestamp: e.timestamp,
+          source: e.source,
+          level: e.level,
+          type: e.type,
+          ...parsed
+        };
+      });
+      content = JSON.stringify(formatted, null, 2);
+  }
+  import_fs13.default.writeFileSync(filepath, content, "utf-8");
+  return filepath;
+}
+function printStats(stats) {
+  console.log("\n\x1B[1mLog Statistics\x1B[0m\n");
+  console.log(`Total events: ${stats.total}`);
+  if (Object.keys(stats.bySource).length > 0) {
+    console.log("\n\x1B[1mBy Source:\x1B[0m");
+    Object.entries(stats.bySource).sort((a, b) => b[1] - a[1]).forEach(([source, count]) => {
+      console.log(`  ${source.padEnd(15)} ${count} events`);
+    });
+  }
+  if (Object.keys(stats.byLevel).length > 0) {
+    console.log("\n\x1B[1mBy Level:\x1B[0m");
+    const levelColors = {
+      error: "\x1B[31m",
+      warn: "\x1B[33m",
+      info: "\x1B[36m",
+      debug: "\x1B[90m"
+    };
+    Object.entries(stats.byLevel).forEach(([level, count]) => {
+      const color = levelColors[level] || "";
+      console.log(`  ${color}${level.padEnd(8)}\x1B[0m ${count} events`);
+    });
+  }
+  if (Object.keys(stats.byProvider).length > 0) {
+    console.log("\n\x1B[1mBy Provider:\x1B[0m");
+    Object.entries(stats.byProvider).sort((a, b) => b[1] - a[1]).forEach(([provider, count]) => {
+      console.log(`  ${provider.padEnd(12)} ${count} events`);
+    });
+  }
+  if (stats.slowest.length > 0) {
+    console.log("\n\x1B[1mSlowest Operations:\x1B[0m");
+    stats.slowest.forEach((op, i) => {
+      console.log(`  ${i + 1}. ${op.operation.padEnd(30)} ${op.avgMs}ms avg (${op.count} calls, max: ${op.maxMs}ms)`);
+    });
+  }
+  console.log("");
+}
+async function handleLogsCommand(args, flags) {
+  const {
+    limit,
+    last,
+    since,
+    until,
+    filter,
+    source,
+    level,
+    type,
+    provider,
+    "session-id": sessionId,
+    "terminal-id": terminalId,
+    "slow-only": slowOnly,
+    "slow-threshold": slowThreshold,
+    "before-crash": beforeCrash,
+    stats,
+    export: exportPath,
+    format = "json",
+    verbose,
+    json
+  } = flags;
+  if (stats) {
+    const options2 = {};
+    if (last) options2.since = Date.now() - parseTimeAgo(last);
+    if (since) options2.since = parseTimestamp(since);
+    if (until) options2.until = parseTimestamp(until);
+    if (filter) options2.search = filter;
+    const statsData = getLogStats(options2);
+    printStats(statsData);
+    return;
+  }
+  const options = {
+    limit: parseInt(limit) || 50,
+    source,
+    level,
+    type,
+    provider,
+    sessionId,
+    terminalId: terminalId ? parseInt(terminalId) : void 0,
+    slowOnly: !!slowOnly,
+    slowThreshold: slowThreshold ? parseInt(slowThreshold) : 1e3
+  };
+  if (beforeCrash) {
+    const crashLogs = getBeforeCrashLogs();
+    console.log(`
+\x1B[33mLast ${crashLogs.length} events before crash:\x1B[0m
+`);
+    crashLogs.forEach((e) => console.log(formatLogEvent(e, { verbose, json })));
+    return;
+  }
+  if (last) {
+    options.since = Date.now() - parseTimeAgo(last);
+  }
+  if (since) {
+    options.since = parseTimestamp(since);
+  }
+  if (until) {
+    options.until = parseTimestamp(until);
+  }
+  if (filter) {
+    if (Array.isArray(filter)) {
+      options.search = filter.join(" ");
+    } else {
+      options.search = filter;
+    }
+  }
+  const logs = queryLogs(options);
+  if (exportPath) {
+    const filepath = exportLogs(logs, exportPath, format);
+    console.log(`
+\u2705 Exported ${logs.length} logs to: ${filepath}
+`);
+    return;
+  }
+  if (logs.length === 0) {
+    console.log("\nNo logs found matching filters.\n");
+    return;
+  }
+  console.log(`
+\x1B[90mShowing ${logs.length} logs:\x1B[0m
+`);
+  logs.forEach((e) => console.log(formatLogEvent(e, { verbose, json })));
+  console.log("");
+}
+
 // src/index.js
 var VERSION = "2.0.0";
 async function main() {
@@ -17253,6 +17693,9 @@ async function main() {
       case "update":
       case "upgrade":
         await cmdUpdate(args, flags);
+        break;
+      case "logs":
+        await handleLogsCommand(args, flags);
         break;
       case "help":
         printHelp(args[0]);

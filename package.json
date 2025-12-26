@@ -19,7 +19,9 @@
     "@prompt-stack/runner": "workspace:*",
     "better-sqlite3": "^11.0.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.27.2"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
