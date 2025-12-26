@@ -80,15 +80,27 @@ export async function cmdSearch(args, flags) {
 async function listAllPackages(flags) {
   const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : flags.tools ? 'tool' : flags.agents ? 'agent' : null;
 
-  console.log(kind ? `Listing all ${kind}s...` : 'Listing all available packages...');
-
   try {
     const kinds = kind ? [kind] : ['stack', 'prompt', 'runtime', 'tool', 'agent'];
+    const allPackages = {};
     let totalCount = 0;
 
     for (const k of kinds) {
       const packages = await listPackages(k);
+      allPackages[k] = packages;
+      totalCount += packages.length;
+    }
 
+    // JSON output mode
+    if (flags.json) {
+      console.log(JSON.stringify(allPackages, null, 2));
+      return;
+    }
+
+    console.log(kind ? `Listing all ${kind}s...` : 'Listing all available packages...');
+
+    for (const k of kinds) {
+      const packages = allPackages[k];
       if (packages.length === 0) continue;
 
       console.log(`\n${k.toUpperCase()}S (${packages.length}):`);
@@ -100,8 +112,6 @@ async function listAllPackages(flags) {
         console.log(`  ${id}${runtime}`);
         console.log(`    ${pkg.description || 'No description'}`);
       }
-
-      totalCount += packages.length;
     }
 
     console.log(`\nTotal: ${totalCount} package(s) available`);

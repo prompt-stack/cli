@@ -442,7 +442,7 @@ var init_src2 = __esm({
     import_crypto = __toESM(require("crypto"), 1);
     init_src();
     DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/prompt-stack/registry/main/index.json";
-    RUNTIMES_DOWNLOAD_BASE = "https://github.com/prompt-stack/runtimes/releases/download";
+    RUNTIMES_DOWNLOAD_BASE = "https://github.com/prompt-stack/registry/releases/download";
     CACHE_TTL = 24 * 60 * 60 * 1e3;
     LOCAL_REGISTRY_PATHS = [
       import_path2.default.join(process.cwd(), "registry", "index.json"),
@@ -14993,10 +14993,12 @@ async function installSinglePackage(pkg, options = {}) {
           import_fs4.default.mkdirSync(installPath, { recursive: true });
         }
         onProgress?.({ phase: "installing", package: pkg.id, message: `npm install ${pkg.npmPackage}` });
+        const resourcesPath = process.env.RESOURCES_PATH;
+        const npmCmd = resourcesPath ? import_path4.default.join(resourcesPath, "bundled-runtimes", "node", "bin", "npm") : "npm";
         if (!import_fs4.default.existsSync(import_path4.default.join(installPath, "package.json"))) {
-          execSync2("npm init -y", { cwd: installPath, stdio: "pipe" });
+          execSync2(`"${npmCmd}" init -y`, { cwd: installPath, stdio: "pipe" });
         }
-        execSync2(`npm install ${pkg.npmPackage}`, { cwd: installPath, stdio: "pipe" });
+        execSync2(`"${npmCmd}" install ${pkg.npmPackage}`, { cwd: installPath, stdio: "pipe" });
         import_fs4.default.writeFileSync(
           import_path4.default.join(installPath, "manifest.json"),
           JSON.stringify({
@@ -15021,7 +15023,9 @@ async function installSinglePackage(pkg, options = {}) {
           import_fs4.default.mkdirSync(installPath, { recursive: true });
         }
         onProgress?.({ phase: "installing", package: pkg.id, message: `pip install ${pkg.pipPackage}` });
-        execSync2(`python3 -m venv "${installPath}/venv"`, { stdio: "pipe" });
+        const pythonPath = import_path4.default.join(PATHS.runtimes, "python", "bin", "python3");
+        const pythonCmd = import_fs4.default.existsSync(pythonPath) ? pythonPath : "python3";
+        execSync2(`"${pythonCmd}" -m venv "${installPath}/venv"`, { stdio: "pipe" });
         execSync2(`"${installPath}/venv/bin/pip" install ${pkg.pipPackage}`, { stdio: "pipe" });
         import_fs4.default.writeFileSync(
           import_path4.default.join(installPath, "manifest.json"),
@@ -15228,12 +15232,22 @@ Found ${results.length} package(s):
 }
 async function listAllPackages(flags) {
   const kind = flags.stacks ? "stack" : flags.prompts ? "prompt" : flags.runtimes ? "runtime" : flags.tools ? "tool" : flags.agents ? "agent" : null;
-  console.log(kind ? `Listing all ${kind}s...` : "Listing all available packages...");
   try {
     const kinds = kind ? [kind] : ["stack", "prompt", "runtime", "tool", "agent"];
+    const allPackages = {};
     let totalCount = 0;
     for (const k of kinds) {
       const packages = await listPackages(k);
+      allPackages[k] = packages;
+      totalCount += packages.length;
+    }
+    if (flags.json) {
+      console.log(JSON.stringify(allPackages, null, 2));
+      return;
+    }
+    console.log(kind ? `Listing all ${kind}s...` : "Listing all available packages...");
+    for (const k of kinds) {
+      const packages = allPackages[k];
       if (packages.length === 0) continue;
       console.log(`
 ${k.toUpperCase()}S (${packages.length}):`);
@@ -15244,7 +15258,6 @@ ${k.toUpperCase()}S (${packages.length}):`);
         console.log(`  ${id}${runtime}`);
         console.log(`    ${pkg.description || "No description"}`);
       }
-      totalCount += packages.length;
     }
     console.log(`
 Total: ${totalCount} package(s) available`);
