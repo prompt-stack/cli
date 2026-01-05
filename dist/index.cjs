@@ -15383,7 +15383,6 @@ var fs5 = __toESM(require("fs/promises"), 1);
 var path5 = __toESM(require("path"), 1);
 var os2 = __toESM(require("os"), 1);
 var HOME = os2.homedir();
-var PROMPT_STACK_DIR = path5.join(HOME, ".prompt-stack");
 var AGENT_CONFIGS = {
   claude: path5.join(HOME, ".claude", "settings.json"),
   codex: path5.join(HOME, ".codex", "config.toml"),
@@ -15519,11 +15518,30 @@ async function writeToml(filePath, data) {
   await fs5.mkdir(dir, { recursive: true });
   await fs5.writeFile(filePath, stringifyToml(data), "utf-8");
 }
-async function readSecrets() {
-  const secretsPath = path5.join(PROMPT_STACK_DIR, "secrets.json");
+function parseEnvFile(content) {
+  const env = {};
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+      value = value.slice(1, -1);
+    }
+    if (value) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+async function readStackEnv(installPath) {
+  const envPath = path5.join(installPath, ".env");
   try {
-    const content = await fs5.readFile(secretsPath, "utf-8");
-    return JSON.parse(content);
+    const content = await fs5.readFile(envPath, "utf-8");
+    return parseEnvFile(content);
   } catch {
     return {};
   }
@@ -15552,19 +15570,7 @@ async function buildMcpConfig(stackId, installPath, manifest) {
   } else {
     return null;
   }
-  const env = {};
-  const secrets = await readSecrets();
-  const envDefs = manifest.env || {};
-  const secretDefs = manifest.secrets || [];
-  const secretKeys = /* @__PURE__ */ new Set([
-    ...Object.keys(envDefs),
-    ...secretDefs.map((s) => typeof s === "string" ? s : s.key)
-  ]);
-  for (const key of secretKeys) {
-    if (secrets[key]) {
-      env[key] = secrets[key];
-    }
-  }
+  const env = await readStackEnv(installPath);
   const config = {
     command,
     cwd
@@ -15713,6 +15719,35 @@ async function loadManifest(installPath) {
     return null;
   }
 }
+async function createEnvFile(installPath, manifest) {
+  if (!manifest?.secrets?.length) return null;
+  const envPath = path6.join(installPath, ".env");
+  try {
+    await fs6.access(envPath);
+    console.log(`  .env file already exists, preserving existing secrets`);
+    return envPath;
+  } catch {
+  }
+  const lines = [];
+  lines.push("# Environment variables for this stack");
+  lines.push("# Fill in your API keys below");
+  lines.push("");
+  for (const secret of manifest.secrets) {
+    const key = typeof secret === "string" ? secret : secret.key;
+    const description = typeof secret === "object" ? secret.description : null;
+    const helpUrl = typeof secret === "object" ? secret.helpUrl : null;
+    if (description) {
+      lines.push(`# ${description}`);
+    }
+    if (helpUrl) {
+      lines.push(`# Get yours: ${helpUrl}`);
+    }
+    lines.push(`${key}=`);
+    lines.push("");
+  }
+  await fs6.writeFile(envPath, lines.join("\n"), "utf-8");
+  return envPath;
+}
 async function cmdInstall(args, flags) {
   const pkgId = args[0];
   if (!pkgId) {
@@ -15776,7 +15811,23 @@ Installing...`);
         const manifest = await loadManifest(result.path);
         if (manifest) {
           const stackId = resolved.id.replace(/^stack:/, "");
+          const envPath = await createEnvFile(result.path, manifest);
           await registerMcpAll(stackId, result.path, manifest);
+          if (manifest.secrets?.length > 0) {
+            console.log(`
+\u26A0\uFE0F  This stack requires configuration:`);
+            console.log(`  Edit: ${envPath}`);
+            console.log(`
+  Required secrets:`);
+            for (const secret of manifest.secrets) {
+              const key = typeof secret === "string" ? secret : secret.key;
+              const label = typeof secret === "object" ? secret.label : key;
+              console.log(`    - ${label} (${key})`);
+            }
+            console.log(`
+  After adding secrets, run: pstack run ${pkgId}`);
+            return;
+          }
         }
       }
       console.log(`

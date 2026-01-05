@@ -1,209 +1,91 @@
-# pstack CLI
+# pstack
 
-Package manager for Prompt Stack workflows. Search, install, and execute stacks from the command line.
+Package manager for MCP stacks. Install tools that work with Claude, Codex, and Gemini.
 
-## Installation
-
-```bash
-npm install -g @prompt-stack/cli
-```
-
-Verify installation:
+## Install
 
 ```bash
-pstack --version
+npm i -g @prompt-stack/prompt-stack
 ```
 
 ## Quick Start
 
-Search for stacks:
-
 ```bash
-pstack search youtube
-```
+# See what's available
+pstack search --all
 
-Install a stack:
+# Install a stack
+pstack install stack:slack
 
-```bash
-pstack install youtube-summarizer
-```
+# Add your API key
+nano ~/.prompt-stack/stacks/slack/.env
 
-Run a stack:
-
-```bash
-pstack run youtube-summarizer --url "https://youtube.com/watch?v=dQw4w9WgXcQ"
+# Done - Claude/Codex/Gemini can now use Slack tools
 ```
 
 ## Commands
 
-### Search and Discovery
+```bash
+pstack search <query>      # Search for packages
+pstack search --all        # List all packages
+pstack install <pkg>       # Install a package
+pstack remove <pkg>        # Remove a package
+pstack list [kind]         # List installed (stacks, runtimes, tools, agents)
+pstack update [pkg]        # Update packages
+pstack doctor              # Check system health
+```
+
+## Available Stacks
+
+| Stack | Description | Auth |
+|-------|-------------|------|
+| `stack:postgres` | Query PostgreSQL databases | DATABASE_URL |
+| `stack:slack` | Send messages, search channels | SLACK_BOT_TOKEN |
+| `stack:notion-workspace` | Pages, databases, search | NOTION_API_KEY |
+| `stack:google-workspace` | Gmail, Sheets, Docs, Drive, Calendar | OAuth |
+| `stack:google-ai` | Gemini, Imagen, Veo | GOOGLE_AI_API_KEY |
+| `stack:openai` | DALL-E, Whisper, TTS, Sora | OPENAI_API_KEY |
+| `stack:zoho-mail` | Email via Zoho | OAuth |
+| `stack:content-extractor` | YouTube, Reddit, TikTok transcripts | - |
+| `stack:video-editor` | Trim, speed, compress videos | - |
+| `stack:ms-office` | Read Word/Excel files | - |
+| `stack:whisper` | Local audio transcription | - |
+
+## Secrets
+
+Each stack has its own `.env` file:
+
+```
+~/.prompt-stack/stacks/<stack>/.env
+```
+
+When you install a stack, a `.env` is created with placeholders. Add your keys:
 
 ```bash
-pstack search <query>          # Search registry for stacks, prompts, runtimes
-pstack search --all            # List all available packages
-pstack info <package>          # Show package manifest, inputs, outputs
+# ~/.prompt-stack/stacks/postgres/.env
+DATABASE_URL=postgresql://user:pass@host:5432/db
 ```
 
-### Installation
+Secrets are automatically injected into Claude, Codex, and Gemini configs.
 
-```bash
-pstack install <package>       # Install a package (stack, prompt, or runtime)
-pstack list                    # Show installed packages
-pstack remove <package>        # Uninstall a package
-pstack update [package]        # Update all or a specific package
-```
+## How It Works
 
-### Execution
+1. `pstack install stack:slack` downloads the MCP server
+2. Creates `.env` with required secrets as placeholders
+3. Registers the MCP server in `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`
+4. You fill in the API key in `.env`
+5. Claude/Codex/Gemini can now use the tools
 
-```bash
-pstack run <stack>             # Execute a stack with defaults
-pstack run <stack> --input '{...}'  # Execute with JSON inputs
-pstack run <stack> --cwd /path # Execute in specific directory
-```
-
-### Database
-
-```bash
-pstack db init                 # Initialize local database
-pstack db search <query>       # Search execution history
-pstack db sessions             # List all sessions
-pstack db stats                # Show usage statistics and costs
-```
-
-### Secrets Management
-
-```bash
-pstack secrets set <name>      # Add a secret
-pstack secrets list            # Show configured secrets (masked)
-pstack secrets remove <name>   # Remove a secret
-```
-
-### System
-
-```bash
-pstack doctor                  # Check installation health
-pstack which <runtime>         # Show path to installed runtime
-pstack --help                  # Show help
-pstack --version               # Show version
-```
-
-## Environment
-
-Create a `.pstackrc` in your home directory for defaults:
-
-```bash
-# ~/.pstackrc
-export PSTACK_AGENT="claude"           # Default AI agent
-export PSTACK_REGISTRY="https://..."   # Custom registry URL
-export PSTACK_CACHE_TTL=86400          # Registry cache duration (seconds)
-```
-
-Secrets are stored in:
-
-```
-~/.prompt-stack/secrets.json           # Encrypted or plaintext (power user managed)
-```
-
-## Examples
-
-### Example 1: Summarize a YouTube Video
-
-```bash
-pstack install youtube-summarizer
-pstack run youtube-summarizer --url "https://youtube.com/watch?v=..."
-```
-
-Output is saved to `~/.prompt-stack/artifacts/`.
-
-### Example 2: Review Code with Multiple Models
-
-```bash
-pstack install code-reviewer
-pstack run code-reviewer --file "./src/main.ts" --compare-models
-```
-
-Results show Claude vs Codex vs Gemini analysis side-by-side.
-
-### Example 3: Search Execution History
-
-```bash
-pstack db search "processed yesterday"
-```
-
-Returns all runs from the past day with metadata.
-
-## Architecture
-
-The CLI is a thin wrapper around `@prompt-stack/core`:
-
-- **@prompt-stack/core**: Resolver, installer, registry client
-- **@prompt-stack/runner**: Execution engine
-- **@prompt-stack/manifest**: Stack/prompt manifest parsing
-
-All logic is shared with Prompt Stack Studio, ensuring consistency.
-
-## Configuration
-
-Default paths:
+## Data Location
 
 ```
 ~/.prompt-stack/
-├── packages/          # Installed stacks, prompts, runtimes
-├── db/                # SQLite databases
-├── cache/             # Registry cache
-├── secrets.json       # Encrypted secrets
-└── locks/             # Version lockfiles
+├── stacks/           # MCP servers (each with .env)
+├── runtimes/         # Node, Python, Deno
+├── tools/            # ffmpeg, ripgrep, etc.
+├── agents/           # Claude, Codex, Gemini CLIs
+└── prompt-stack.db   # Local database
 ```
-
-## Exit Codes
-
-- `0`: Success
-- `1`: General error (invalid input, missing package, execution failure)
-- `2`: Configuration error (missing secrets, invalid manifest)
-- `127`: Runtime not found
-
-## Troubleshooting
-
-### Command Not Found
-
-If `pstack` is not in PATH:
-
-```bash
-# Manually add to shell config
-echo 'export PATH="$HOME/.prompt-stack/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-### Missing Secrets
-
-Before running, ensure required secrets are set:
-
-```bash
-pstack secrets set OPENAI_API_KEY
-pstack secrets set ANTHROPIC_API_KEY
-```
-
-### Check System Health
-
-```bash
-pstack doctor
-
-# Output:
-# ✓ CLI installed: ~/.prompt-stack/bin/pstack
-# ✓ PATH configured: ~/.zshrc
-# ✓ Database: ~/.prompt-stack/db/pstack.db
-# ✗ Missing secret: OPENAI_API_KEY
-```
-
-## Contributing
-
-To contribute:
-
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
-
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 
 ## License
 

@@ -2,7 +2,64 @@
  * Install command - install packages from registry
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { installPackage, resolvePackage } from '@prompt-stack/core';
+import { registerMcpAll } from '../utils/mcp-registry.js';
+
+/**
+ * Load manifest from installed stack path
+ */
+async function loadManifest(installPath) {
+  const manifestPath = path.join(installPath, 'manifest.json');
+  try {
+    const content = await fs.readFile(manifestPath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create .env file with placeholders from manifest.secrets
+ */
+async function createEnvFile(installPath, manifest) {
+  if (!manifest?.secrets?.length) return null;
+
+  const envPath = path.join(installPath, '.env');
+
+  // Check if .env already exists (don't overwrite user's secrets)
+  try {
+    await fs.access(envPath);
+    console.log(`  .env file already exists, preserving existing secrets`);
+    return envPath;
+  } catch {
+    // File doesn't exist, create it
+  }
+
+  const lines = [];
+  lines.push('# Environment variables for this stack');
+  lines.push('# Fill in your API keys below');
+  lines.push('');
+
+  for (const secret of manifest.secrets) {
+    const key = typeof secret === 'string' ? secret : secret.key;
+    const description = typeof secret === 'object' ? secret.description : null;
+    const helpUrl = typeof secret === 'object' ? secret.helpUrl : null;
+
+    if (description) {
+      lines.push(`# ${description}`);
+    }
+    if (helpUrl) {
+      lines.push(`# Get yours: ${helpUrl}`);
+    }
+    lines.push(`${key}=`);
+    lines.push('');
+  }
+
+  await fs.writeFile(envPath, lines.join('\n'), 'utf-8');
+  return envPath;
+}
 
 export async function cmdInstall(args, flags) {
   const pkgId = args[0];
@@ -69,6 +126,34 @@ export async function cmdInstall(args, flags) {
         console.log(`\n  Also installed:`);
         for (const id of result.installed) {
           console.log(`    - ${id}`);
+        }
+      }
+
+      // For stacks: create .env and register MCP
+      if (resolved.kind === 'stack') {
+        const manifest = await loadManifest(result.path);
+        if (manifest) {
+          const stackId = resolved.id.replace(/^stack:/, '');
+
+          // Create .env file with placeholders
+          const envPath = await createEnvFile(result.path, manifest);
+
+          // Register MCP in agent configs (Claude, Codex, Gemini)
+          await registerMcpAll(stackId, result.path, manifest);
+
+          // Show next steps if secrets are required
+          if (manifest.secrets?.length > 0) {
+            console.log(`\n⚠️  This stack requires configuration:`);
+            console.log(`  Edit: ${envPath}`);
+            console.log(`\n  Required secrets:`);
+            for (const secret of manifest.secrets) {
+              const key = typeof secret === 'string' ? secret : secret.key;
+              const label = typeof secret === 'object' ? secret.label : key;
+              console.log(`    - ${label} (${key})`);
+            }
+            console.log(`\n  After adding secrets, run: pstack run ${pkgId}`);
+            return;
+          }
         }
       }
 

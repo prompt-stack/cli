@@ -1,35 +1,53 @@
 {
-  "name": "pstack-cli",
+  "name": "@prompt-stack/prompt-stack",
   "version": "2.0.0",
-  "description": "Prompt Stack CLI - Package and runtime management",
+  "description": "Prompt Stack CLI - Install and manage MCP stacks, runtimes, and tools",
   "type": "module",
-  "main": "src/index.js",
+  "main": "dist/index.cjs",
   "bin": {
-    "pstack": "./src/index.js"
+    "pstack": "dist/index.cjs"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "start": "node src/index.js",
-    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=index.cjs --external:better-sqlite3",
-    "test": "node --test src/__tests__/",
-    "legacy": "node index.cjs"
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:better-sqlite3",
+    "prepublishOnly": "npm run build",
+    "test": "node --test src/__tests__/"
   },
   "dependencies": {
+    "better-sqlite3": "^12.5.0"
+  },
+  "devDependencies": {
     "@prompt-stack/core": "workspace:*",
     "@prompt-stack/env": "workspace:*",
     "@prompt-stack/manifest": "workspace:*",
     "@prompt-stack/registry-client": "workspace:*",
     "@prompt-stack/runner": "workspace:*",
-    "better-sqlite3": "^12.5.0"
-  },
-  "devDependencies": {
     "esbuild": "^0.27.2"
   },
   "engines": {
     "node": ">=18.0.0"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "claude",
+    "codex",
+    "gemini",
+    "prompt-stack",
+    "cli"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/prompt-stack/cli.git"
+    "url": "https://github.com/prompt-stack/prompt-stack.git"
+  },
+  "homepage": "https://prompt-stack.dev",
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT"
 }

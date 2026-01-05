@@ -3,6 +3,7 @@
  */
 
 import { uninstallPackage, isPackageInstalled } from '@prompt-stack/core';
+import { unregisterMcpAll } from '../utils/mcp-registry.js';
 
 export async function cmdRemove(args, flags) {
   const pkgId = args[0];
@@ -35,6 +36,10 @@ export async function cmdRemove(args, flags) {
     const result = await uninstallPackage(fullId);
 
     if (result.success) {
+      // Unregister MCP from agent configs (Claude, Codex, Gemini)
+      const stackId = fullId.replace(/^stack:/, '');
+      await unregisterMcpAll(stackId);
+
       console.log(`✓ Removed ${fullId}`);
     } else {
       console.error(`✗ Failed to remove: ${result.error}`);

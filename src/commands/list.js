@@ -1,5 +1,11 @@
 /**
  * List command - list installed packages
+ *
+ * Usage:
+ *   pstack list [kind]              List all or filter by kind
+ *   pstack list prompts             List prompts
+ *   pstack list prompts --category=coding   Filter by category
+ *   pstack list --json              Output as JSON
  */
 
 import { listInstalled } from '@prompt-stack/core';
@@ -24,7 +30,13 @@ export async function cmdList(args, flags) {
   }
 
   try {
-    const packages = await listInstalled(kind);
+    let packages = await listInstalled(kind);
+
+    // Filter by category (only for prompts)
+    const categoryFilter = flags.category;
+    if (categoryFilter) {
+      packages = packages.filter(p => p.category === categoryFilter);
+    }
 
     if (flags.json) {
       console.log(JSON.stringify(packages, null, 2));
@@ -32,7 +44,9 @@ export async function cmdList(args, flags) {
     }
 
     if (packages.length === 0) {
-      if (kind) {
+      if (categoryFilter) {
+        console.log(`No ${kind || 'packages'}s found in category: ${categoryFilter}`);
+      } else if (kind) {
         console.log(`No ${kind}s installed.`);
       } else {
         console.log('No packages installed.');
@@ -41,7 +55,38 @@ export async function cmdList(args, flags) {
       return;
     }
 
-    // Group by kind
+    // For prompts, group by category if showing all prompts
+    if (kind === 'prompt' && !categoryFilter) {
+      const byCategory = {};
+      for (const pkg of packages) {
+        const cat = pkg.category || 'general';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push(pkg);
+      }
+
+      console.log(`\nPROMPTS (${packages.length}):`);
+      console.log('─'.repeat(50));
+
+      for (const [category, prompts] of Object.entries(byCategory).sort()) {
+        console.log(`\n  ${category.toUpperCase()} (${prompts.length}):`);
+        for (const pkg of prompts) {
+          const icon = pkg.icon ? `${pkg.icon} ` : '';
+          console.log(`    ${icon}${pkg.id || `prompt:${pkg.name}`}`);
+          if (pkg.description) {
+            console.log(`      ${pkg.description}`);
+          }
+          if (pkg.tags && pkg.tags.length > 0) {
+            console.log(`      Tags: ${pkg.tags.join(', ')}`);
+          }
+        }
+      }
+
+      console.log(`\nTotal: ${packages.length} prompt(s)`);
+      console.log(`\nFilter by category: pstack list prompts --category=coding`);
+      return;
+    }
+
+    // Group by kind (standard display)
     const grouped = {
       stack: packages.filter(p => p.kind === 'stack'),
       prompt: packages.filter(p => p.kind === 'prompt'),
@@ -60,10 +105,17 @@ export async function cmdList(args, flags) {
       console.log('─'.repeat(50));
 
       for (const pkg of pkgs) {
-        console.log(`  ${pkg.id || `${pkgKind}:${pkg.name}`}`);
+        const icon = pkg.icon ? `${pkg.icon} ` : '';
+        console.log(`  ${icon}${pkg.id || `${pkgKind}:${pkg.name}`}`);
         console.log(`    Version: ${pkg.version || 'unknown'}`);
         if (pkg.description) {
           console.log(`    ${pkg.description}`);
+        }
+        if (pkg.category) {
+          console.log(`    Category: ${pkg.category}`);
+        }
+        if (pkg.tags && pkg.tags.length > 0) {
+          console.log(`    Tags: ${pkg.tags.join(', ')}`);
         }
         if (pkg.installedAt) {
           console.log(`    Installed: ${new Date(pkg.installedAt).toLocaleDateString()}`);
