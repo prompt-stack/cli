@@ -15778,6 +15778,11 @@ async function buildMcpConfig(stackId, installPath, manifest) {
   } else {
     return null;
   }
+  const optimized = await optimizeEntryPoint(installPath, command, args);
+  if (optimized) {
+    command = optimized.command;
+    args = optimized.args;
+  }
   const env = await readStackEnv(installPath);
   const config = {
     command,
@@ -15790,6 +15795,27 @@ async function buildMcpConfig(stackId, installPath, manifest) {
     config.env = env;
   }
   return config;
+}
+async function optimizeEntryPoint(installPath, command, args) {
+  if (command !== "npx" || !args.includes("tsx")) {
+    return null;
+  }
+  const tsFileIndex = args.findIndex((arg) => arg.endsWith(".ts"));
+  if (tsFileIndex === -1) {
+    return null;
+  }
+  const tsFile = args[tsFileIndex];
+  const jsFile = tsFile.replace("/src/", "/dist/").replace(".ts", ".js");
+  const jsPath = path5.isAbsolute(jsFile) ? jsFile : path5.join(installPath, jsFile);
+  try {
+    await fs5.access(jsPath);
+    return {
+      command: "node",
+      args: [jsPath]
+    };
+  } catch {
+    return null;
+  }
 }
 async function registerMcpClaude(stackId, installPath, manifest) {
   const configPath = AGENT_CONFIGS.claude;
