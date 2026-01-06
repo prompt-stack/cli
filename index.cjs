@@ -678,11 +678,11 @@ var init_src2 = __esm({
     DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/prompt-stack/registry/main/index.json";
     RUNTIMES_DOWNLOAD_BASE = "https://github.com/prompt-stack/registry/releases/download";
     CACHE_TTL = 24 * 60 * 60 * 1e3;
-    LOCAL_REGISTRY_PATHS = [
+    LOCAL_REGISTRY_PATHS = process.env.USE_LOCAL_REGISTRY === "true" ? [
       import_path2.default.join(process.cwd(), "registry", "index.json"),
       import_path2.default.join(process.cwd(), "..", "registry", "index.json"),
       "/Users/hoff/dev/prompt-stack/registry/index.json"
-    ];
+    ] : [];
     PACKAGE_KINDS2 = ["stack", "prompt", "runtime", "tool", "agent"];
     RUNTIMES_RELEASE_VERSION = "v1.0.0";
   }
