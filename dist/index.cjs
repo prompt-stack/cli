@@ -15346,6 +15346,10 @@ async function installSinglePackage(pkg, options = {}) {
             }, null, 2)
           );
         }
+        if (pkg.kind === "stack") {
+          onProgress?.({ phase: "installing-deps", package: pkg.id });
+          await installStackDependencies(installPath, onProgress);
+        }
       }
       onProgress?.({ phase: "installed", package: pkg.id });
       return { success: true, id: pkg.id, path: installPath };
@@ -15485,6 +15489,34 @@ async function listInstalled(kind) {
     }
   }
   return packages;
+}
+async function installStackDependencies(stackPath, onProgress) {
+  const { execSync: execSync4 } = await import("child_process");
+  const nodePath = import_path4.default.join(stackPath, "node");
+  if (import_fs4.default.existsSync(nodePath)) {
+    const packageJsonPath = import_path4.default.join(nodePath, "package.json");
+    if (import_fs4.default.existsSync(packageJsonPath)) {
+      onProgress?.({ phase: "installing-deps", message: "Installing Node.js dependencies..." });
+      try {
+        execSync4("npm install", { cwd: nodePath, stdio: "pipe" });
+      } catch (error) {
+        console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
+      }
+    }
+  }
+  const pythonPath = import_path4.default.join(stackPath, "python");
+  if (import_fs4.default.existsSync(pythonPath)) {
+    const requirementsPath = import_path4.default.join(pythonPath, "requirements.txt");
+    if (import_fs4.default.existsSync(requirementsPath)) {
+      onProgress?.({ phase: "installing-deps", message: "Installing Python dependencies..." });
+      try {
+        execSync4("python3 -m venv venv", { cwd: pythonPath, stdio: "pipe" });
+        execSync4("./venv/bin/pip install -r requirements.txt", { cwd: pythonPath, stdio: "pipe" });
+      } catch (error) {
+        console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
+      }
+    }
+  }
 }
 
 // src/commands/search.js
