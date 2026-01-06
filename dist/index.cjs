@@ -15498,7 +15498,8 @@ async function installStackDependencies(stackPath, onProgress) {
     if (import_fs4.default.existsSync(packageJsonPath)) {
       onProgress?.({ phase: "installing-deps", message: "Installing Node.js dependencies..." });
       try {
-        execSync4("npm install", { cwd: nodePath, stdio: "pipe" });
+        const npmCmd = await findNpmExecutable();
+        execSync4(`"${npmCmd}" install`, { cwd: nodePath, stdio: "pipe" });
       } catch (error) {
         console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
       }
@@ -15510,13 +15511,46 @@ async function installStackDependencies(stackPath, onProgress) {
     if (import_fs4.default.existsSync(requirementsPath)) {
       onProgress?.({ phase: "installing-deps", message: "Installing Python dependencies..." });
       try {
-        execSync4("python3 -m venv venv", { cwd: pythonPath, stdio: "pipe" });
+        const pythonCmd = await findPythonExecutable();
+        execSync4(`"${pythonCmd}" -m venv venv`, { cwd: pythonPath, stdio: "pipe" });
         execSync4("./venv/bin/pip install -r requirements.txt", { cwd: pythonPath, stdio: "pipe" });
       } catch (error) {
         console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
       }
     }
   }
+}
+async function findNpmExecutable() {
+  const isWindows = process.platform === "win32";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const binDir = isWindows ? "" : "bin";
+  const exe = isWindows ? "npm.cmd" : "npm";
+  const bundledNodeBase = import_path4.default.join(PATHS.runtimes, "node");
+  const archSpecificNpm = import_path4.default.join(bundledNodeBase, arch, binDir, exe);
+  if (import_fs4.default.existsSync(archSpecificNpm)) {
+    return archSpecificNpm;
+  }
+  const flatNpm = import_path4.default.join(bundledNodeBase, binDir, exe);
+  if (import_fs4.default.existsSync(flatNpm)) {
+    return flatNpm;
+  }
+  return "npm";
+}
+async function findPythonExecutable() {
+  const isWindows = process.platform === "win32";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const binDir = isWindows ? "" : "bin";
+  const exe = isWindows ? "python.exe" : "python3";
+  const bundledPythonBase = import_path4.default.join(PATHS.runtimes, "python");
+  const archSpecificPython = import_path4.default.join(bundledPythonBase, arch, binDir, exe);
+  if (import_fs4.default.existsSync(archSpecificPython)) {
+    return archSpecificPython;
+  }
+  const flatPython = import_path4.default.join(bundledPythonBase, binDir, exe);
+  if (import_fs4.default.existsSync(flatPython)) {
+    return flatPython;
+  }
+  return "python3";
 }
 
 // src/commands/search.js
