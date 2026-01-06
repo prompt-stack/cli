@@ -186,6 +186,7 @@ __export(src_exports, {
   computeHash: () => computeHash,
   downloadPackage: () => downloadPackage,
   downloadRuntime: () => downloadRuntime,
+  downloadTool: () => downloadTool,
   fetchIndex: () => fetchIndex,
   getPackage: () => getPackage,
   getPackageKinds: () => getPackageKinds,
@@ -429,6 +430,207 @@ async function downloadRuntime(runtime, version, destPath, options = {}) {
     }
     throw new Error(`Failed to install ${runtime} ${version}: ${error.message}`);
   }
+}
+async function downloadTool(toolName, destPath, options = {}) {
+  const { onProgress } = options;
+  const platformArch = getPlatformArch();
+  const toolManifest = await loadToolManifest(toolName);
+  if (!toolManifest) {
+    throw new Error(`Tool manifest not found for: ${toolName}`);
+  }
+  const tempDir = import_path2.default.join(PATHS.cache, "downloads");
+  if (!import_fs2.default.existsSync(tempDir)) {
+    import_fs2.default.mkdirSync(tempDir, { recursive: true });
+  }
+  if (import_fs2.default.existsSync(destPath)) {
+    import_fs2.default.rmSync(destPath, { recursive: true });
+  }
+  import_fs2.default.mkdirSync(destPath, { recursive: true });
+  const { execSync: execSync2 } = await import("child_process");
+  const downloads = toolManifest.downloads?.[platformArch];
+  if (downloads && Array.isArray(downloads)) {
+    const downloadedUrls = /* @__PURE__ */ new Set();
+    for (const download of downloads) {
+      const { url, type, binary } = download;
+      if (downloadedUrls.has(url)) {
+        await extractBinaryFromPath(destPath, binary, destPath);
+        continue;
+      }
+      onProgress?.({ phase: "downloading", tool: toolName, binary: import_path2.default.basename(binary), url });
+      const urlFilename = import_path2.default.basename(new URL(url).pathname);
+      const tempFile = import_path2.default.join(tempDir, urlFilename);
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "pstack-cli/2.0",
+            "Accept": "application/octet-stream"
+          }
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to download ${binary}: HTTP ${response.status}`);
+        }
+        const buffer = await response.arrayBuffer();
+        import_fs2.default.writeFileSync(tempFile, Buffer.from(buffer));
+        downloadedUrls.add(url);
+        onProgress?.({ phase: "extracting", tool: toolName, binary: import_path2.default.basename(binary) });
+        const archiveType = type || guessArchiveType(urlFilename);
+        if (archiveType === "zip") {
+          execSync2(`unzip -o "${tempFile}" -d "${destPath}"`, { stdio: "pipe" });
+        } else if (archiveType === "tar.xz") {
+          execSync2(`tar -xJf "${tempFile}" -C "${destPath}"`, { stdio: "pipe" });
+        } else if (archiveType === "tar.gz" || archiveType === "tgz") {
+          execSync2(`tar -xzf "${tempFile}" -C "${destPath}"`, { stdio: "pipe" });
+        } else {
+          throw new Error(`Unsupported archive type: ${archiveType}`);
+        }
+        await extractBinaryFromPath(destPath, binary, destPath);
+        import_fs2.default.unlinkSync(tempFile);
+      } catch (error) {
+        if (import_fs2.default.existsSync(tempFile)) {
+          import_fs2.default.unlinkSync(tempFile);
+        }
+        throw error;
+      }
+    }
+    const binaries = toolManifest.binaries || [toolName];
+    for (const bin of binaries) {
+      const binPath = import_path2.default.join(destPath, bin);
+      if (import_fs2.default.existsSync(binPath)) {
+        import_fs2.default.chmodSync(binPath, 493);
+      }
+    }
+  } else {
+    const upstreamUrl = toolManifest.upstream?.[platformArch];
+    if (!upstreamUrl) {
+      throw new Error(`No upstream URL for ${toolName} on ${platformArch}`);
+    }
+    const extractConfig = toolManifest.extract?.[platformArch];
+    if (!extractConfig) {
+      throw new Error(`No extract config for ${toolName} on ${platformArch}`);
+    }
+    onProgress?.({ phase: "downloading", tool: toolName, url: upstreamUrl });
+    const urlFilename = import_path2.default.basename(new URL(upstreamUrl).pathname);
+    const tempFile = import_path2.default.join(tempDir, urlFilename);
+    try {
+      const response = await fetch(upstreamUrl, {
+        headers: {
+          "User-Agent": "pstack-cli/2.0",
+          "Accept": "application/octet-stream"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to download ${toolName}: HTTP ${response.status}`);
+      }
+      const buffer = await response.arrayBuffer();
+      import_fs2.default.writeFileSync(tempFile, Buffer.from(buffer));
+      onProgress?.({ phase: "extracting", tool: toolName });
+      const archiveType = extractConfig.type || guessArchiveType(urlFilename);
+      if (archiveType === "zip") {
+        execSync2(`unzip -o "${tempFile}" -d "${destPath}"`, { stdio: "pipe" });
+      } else if (archiveType === "tar.xz") {
+        execSync2(`tar -xJf "${tempFile}" -C "${destPath}"`, { stdio: "pipe" });
+      } else if (archiveType === "tar.gz" || archiveType === "tgz") {
+        execSync2(`tar -xzf "${tempFile}" -C "${destPath}"`, { stdio: "pipe" });
+      } else {
+        throw new Error(`Unsupported archive type: ${archiveType}`);
+      }
+      await extractBinaryFromPath(destPath, extractConfig.binary || toolName, destPath);
+      const binaries = [toolName, ...toolManifest.additionalBinaries || []];
+      for (const bin of binaries) {
+        const binPath = import_path2.default.join(destPath, bin);
+        if (import_fs2.default.existsSync(binPath)) {
+          import_fs2.default.chmodSync(binPath, 493);
+        }
+      }
+      import_fs2.default.unlinkSync(tempFile);
+    } catch (error) {
+      if (import_fs2.default.existsSync(tempFile)) {
+        import_fs2.default.unlinkSync(tempFile);
+      }
+      throw new Error(`Failed to install ${toolName}: ${error.message}`);
+    }
+  }
+  import_fs2.default.writeFileSync(
+    import_path2.default.join(destPath, "manifest.json"),
+    JSON.stringify({
+      id: `tool:${toolName}`,
+      kind: "tool",
+      name: toolManifest.name || toolName,
+      version: toolManifest.version,
+      binaries: toolManifest.binaries || [toolName],
+      platformArch,
+      installedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2)
+  );
+  onProgress?.({ phase: "complete", tool: toolName, path: destPath });
+  return { success: true, path: destPath };
+}
+async function extractBinaryFromPath(extractedPath, binaryPattern, destPath) {
+  const directPath = import_path2.default.join(destPath, import_path2.default.basename(binaryPattern));
+  if (!binaryPattern.includes("/") && !binaryPattern.includes("*")) {
+    if (import_fs2.default.existsSync(directPath)) {
+      return;
+    }
+  }
+  if (binaryPattern.includes("*") || binaryPattern.includes("/")) {
+    const parts = binaryPattern.split("/");
+    let currentPath = extractedPath;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (part.includes("*")) {
+        if (!import_fs2.default.existsSync(currentPath)) break;
+        const entries = import_fs2.default.readdirSync(currentPath);
+        const pattern = new RegExp("^" + part.replace(/\*/g, ".*") + "$");
+        const match = entries.find((e) => pattern.test(e));
+        if (match) {
+          currentPath = import_path2.default.join(currentPath, match);
+        } else {
+          break;
+        }
+      } else {
+        currentPath = import_path2.default.join(currentPath, part);
+      }
+    }
+    if (import_fs2.default.existsSync(currentPath) && currentPath !== destPath) {
+      const finalPath = import_path2.default.join(destPath, import_path2.default.basename(currentPath));
+      if (currentPath !== finalPath && !import_fs2.default.existsSync(finalPath)) {
+        import_fs2.default.renameSync(currentPath, finalPath);
+      }
+    }
+  }
+}
+async function loadToolManifest(toolName) {
+  for (const basePath of LOCAL_REGISTRY_PATHS) {
+    const registryDir = import_path2.default.dirname(basePath);
+    const manifestPath = import_path2.default.join(registryDir, "catalog", "tools", `${toolName}.json`);
+    if (import_fs2.default.existsSync(manifestPath)) {
+      try {
+        return JSON.parse(import_fs2.default.readFileSync(manifestPath, "utf-8"));
+      } catch {
+        continue;
+      }
+    }
+  }
+  try {
+    const url = `https://raw.githubusercontent.com/prompt-stack/registry/main/catalog/tools/${toolName}.json`;
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "pstack-cli/2.0",
+        "Accept": "application/json"
+      }
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch {
+  }
+  return null;
+}
+function guessArchiveType(filename) {
+  if (filename.endsWith(".tar.gz") || filename.endsWith(".tgz")) return "tar.gz";
+  if (filename.endsWith(".tar.xz")) return "tar.xz";
+  if (filename.endsWith(".zip")) return "zip";
+  return "tar.gz";
 }
 async function verifyHash(filePath, expectedHash) {
   return new Promise((resolve, reject) => {
@@ -15089,9 +15291,15 @@ async function installSinglePackage(pkg, options = {}) {
     }
     const version = pkg.version?.replace(/\.x$/, ".0") || "1.0.0";
     try {
-      await downloadRuntime(pkgName, version, installPath, {
-        onProgress: (p) => onProgress?.({ ...p, package: pkg.id })
-      });
+      if (pkg.kind === "tool") {
+        await downloadTool(pkgName, installPath, {
+          onProgress: (p) => onProgress?.({ ...p, package: pkg.id })
+        });
+      } else {
+        await downloadRuntime(pkgName, version, installPath, {
+          onProgress: (p) => onProgress?.({ ...p, package: pkg.id })
+        });
+      }
       return { success: true, id: pkg.id, path: installPath };
     } catch (error) {
       console.warn(`Package download failed: ${error.message}`);
