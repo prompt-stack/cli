@@ -8,6 +8,7 @@
  *   pstack install <pkg>       Install a package
  *   pstack run <stack>         Run a stack
  *   pstack list [kind]         List installed packages
+ *   pstack which <stack>       Show detailed stack info
  *   pstack remove <pkg>        Remove a package
  *   pstack update [pkg]        Update packages
  *   pstack secrets <cmd>       Manage secrets
@@ -31,6 +32,7 @@ import { cmdDb } from './commands/db.js';
 import { cmdDoctor } from './commands/doctor.js';
 import { cmdUpdate } from './commands/update.js';
 import { cmdLogs } from './commands/logs.js';
+import { cmdWhich } from './commands/which.js';
 
 const VERSION = '2.0.0';
 
@@ -98,6 +100,12 @@ async function main() {
 
       case 'logs':
         await cmdLogs(args, flags);
+        break;
+
+      case 'which':
+      case 'info':
+      case 'show':
+        await cmdWhich(args, flags);
         break;
 
       case 'help':
