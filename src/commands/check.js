@@ -94,6 +94,7 @@ export async function cmdCheck(args, flags) {
     kind,
     name,
     installed: false,
+    source: null, // 'rudi' | 'global' | null
     authenticated: null, // Only for agents
     ready: false,
     path: null,
@@ -103,12 +104,32 @@ export async function cmdCheck(args, flags) {
   // Check installation based on kind
   switch (kind) {
     case 'agent': {
-      const binaryPath = path.join(PATHS.agents, name, 'node_modules', '.bin', name);
-      result.installed = fs.existsSync(binaryPath);
-      result.path = result.installed ? binaryPath : null;
+      // Check RUDI location first (preferred)
+      const rudiPath = path.join(PATHS.agents, name, 'node_modules', '.bin', name);
+      const rudiInstalled = fs.existsSync(rudiPath);
 
-      if (result.installed) {
-        result.version = getVersion(binaryPath);
+      // Check global PATH as fallback
+      let globalPath = null;
+      let globalInstalled = false;
+      if (!rudiInstalled) {
+        try {
+          const which = execSync(`which ${name} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+          // Make sure it's not a RUDI shim
+          if (which && !which.includes('.rudi/bins') && !which.includes('.rudi/shims')) {
+            globalPath = which;
+            globalInstalled = true;
+          }
+        } catch {
+          // Not in PATH
+        }
+      }
+
+      result.installed = rudiInstalled || globalInstalled;
+      result.path = rudiInstalled ? rudiPath : globalPath;
+      result.source = rudiInstalled ? 'rudi' : (globalInstalled ? 'global' : null);
+
+      if (result.installed && result.path) {
+        result.version = getVersion(result.path);
       }
 
       // Check credentials

@@ -144,11 +144,32 @@ function findBinary(command, kind = 'binary') {
 
 /**
  * Get agent status
+ * Checks both RUDI location (~/.rudi/agents/) and global PATH
  */
 function getAgentStatus(agent) {
-  // Check if installed
-  const binaryPath = path.join(PATHS.agents, agent.id, 'node_modules', '.bin', agent.id);
-  const installed = fs.existsSync(binaryPath);
+  // Check RUDI location first (preferred)
+  const rudiPath = path.join(PATHS.agents, agent.id, 'node_modules', '.bin', agent.id);
+  const rudiInstalled = fs.existsSync(rudiPath);
+
+  // Check global PATH as fallback
+  let globalPath = null;
+  let globalInstalled = false;
+  if (!rudiInstalled) {
+    try {
+      const which = execSync(`which ${agent.id} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+      // Make sure it's not a RUDI shim
+      if (which && !which.includes('.rudi/bins') && !which.includes('.rudi/shims')) {
+        globalPath = which;
+        globalInstalled = true;
+      }
+    } catch {
+      // Not in PATH
+    }
+  }
+
+  const installed = rudiInstalled || globalInstalled;
+  const activePath = rudiInstalled ? rudiPath : globalPath;
+  const source = rudiInstalled ? 'rudi' : (globalInstalled ? 'global' : null);
 
   // Check credentials
   let authenticated = false;
@@ -160,17 +181,18 @@ function getAgentStatus(agent) {
 
   // Get version if installed
   let version = null;
-  if (installed) {
-    version = getVersion(binaryPath, '--version');
+  if (installed && activePath) {
+    version = getVersion(activePath, '--version');
   }
 
   return {
     id: agent.id,
     name: agent.name,
     installed,
+    source,  // 'rudi' | 'global' | null
     authenticated,
     version,
-    path: installed ? binaryPath : null,
+    path: activePath,
     ready: installed && authenticated,
   };
 }
@@ -288,10 +310,10 @@ function printStatus(status, filter) {
     console.log('-'.repeat(50));
     for (const agent of status.agents) {
       const installIcon = agent.installed ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-      const authIcon = agent.authenticated ? '\x1b[32m✓\x1b[0m' : '\x1b[33m○\x1b[0m';
       const version = agent.version ? `v${agent.version}` : '';
-      console.log(`  ${installIcon} ${agent.name} ${version}`);
-      console.log(`    Installed: ${agent.installed ? 'yes' : 'no'}, Auth: ${agent.authenticated ? 'yes' : 'no'}`);
+      const source = agent.source ? `(${agent.source})` : '';
+      console.log(`  ${installIcon} ${agent.name} ${version} ${source}`);
+      console.log(`    Installed: ${agent.installed ? 'yes' : 'no'}, Auth: ${agent.authenticated ? 'yes' : 'no'}, Ready: ${agent.ready ? 'yes' : 'no'}`);
     }
     console.log('');
   }
