@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "start": "node src/index.js",
-    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:better-sqlite3 --external:@learnrudi/core --external:@learnrudi/db --external:@learnrudi/env --external:@learnrudi/manifest --external:@learnrudi/mcp --external:@learnrudi/registry-client --external:@learnrudi/runner --external:@learnrudi/secrets --external:@learnrudi/utils",
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:better-sqlite3 --external:@learnrudi/core --external:@learnrudi/db --external:@learnrudi/env --external:@learnrudi/manifest --external:@learnrudi/mcp --external:@learnrudi/registry-client --external:@learnrudi/runner --external:@learnrudi/secrets --external:@learnrudi/utils && cp src/router-mcp.js dist/router-mcp.js",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "npm run build",
     "test": "node --test src/__tests__/"
