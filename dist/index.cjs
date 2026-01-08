@@ -3228,34 +3228,15 @@ var import_os2 = __toESM(require("os"), 1);
 var import_env6 = require("@learnrudi/env");
 var import_mcp4 = require("@learnrudi/mcp");
 var HOME = import_os2.default.homedir();
-var SHIM_PATH = path9.join(import_env6.PATHS.home, "shims", "rudi-mcp");
-function getInstalledStacks() {
-  const stacksDir = import_env6.PATHS.stacks;
-  if (!fs11.existsSync(stacksDir)) return [];
-  return fs11.readdirSync(stacksDir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith(".")).filter((d) => fs11.existsSync(path9.join(stacksDir, d.name, "manifest.json"))).map((d) => d.name);
-}
-function ensureShim() {
-  const shimsDir = path9.dirname(SHIM_PATH);
-  if (!fs11.existsSync(shimsDir)) {
-    fs11.mkdirSync(shimsDir, { recursive: true });
+var ROUTER_SHIM_PATH = path9.join(import_env6.PATHS.home, "shims", "rudi-router");
+function checkRouterShim() {
+  if (!fs11.existsSync(ROUTER_SHIM_PATH)) {
+    throw new Error(
+      `Router shim not found at ${ROUTER_SHIM_PATH}
+Run: npm install -g @learnrudi/cli@latest`
+    );
   }
-  const shimContent = `#!/usr/bin/env bash
-set -euo pipefail
-# Try rudi in PATH first, fall back to npx
-if command -v rudi &> /dev/null; then
-  exec rudi mcp "$1"
-else
-  exec npx --yes @learnrudi/cli mcp "$1"
-fi
-`;
-  if (fs11.existsSync(SHIM_PATH)) {
-    const existing = fs11.readFileSync(SHIM_PATH, "utf-8");
-    if (existing === shimContent) {
-      return { created: false, path: SHIM_PATH };
-    }
-  }
-  fs11.writeFileSync(SHIM_PATH, shimContent, { mode: 493 });
-  return { created: true, path: SHIM_PATH };
+  return ROUTER_SHIM_PATH;
 }
 function backupConfig(configPath) {
   if (!fs11.existsSync(configPath)) return null;
@@ -3280,24 +3261,23 @@ function writeJsonConfig(configPath, config) {
   }
   fs11.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
-function buildMcpEntry(stackName, agentId) {
+function buildRouterEntry(agentId) {
   const base = {
-    command: SHIM_PATH,
-    args: [stackName]
+    command: ROUTER_SHIM_PATH,
+    args: []
   };
   if (agentId === "claude-desktop" || agentId === "claude-code") {
     return { type: "stdio", ...base };
   }
   return base;
 }
-async function integrateAgent(agentId, stacks, flags) {
+async function integrateAgent(agentId, flags) {
   const agentConfig = import_mcp4.AGENT_CONFIGS.find((a) => a.id === agentId);
   if (!agentConfig) {
     console.error(`Unknown agent: ${agentId}`);
     return { success: false, error: "Unknown agent" };
   }
   const configPath = (0, import_mcp4.findAgentConfig)(agentConfig);
-  const configDir = configPath ? path9.dirname(configPath) : null;
   const targetPath = configPath || path9.join(HOME, agentConfig.paths[process.platform]?.[0] || agentConfig.paths.darwin[0]);
   console.log(`
 ${agentConfig.name}:`);
@@ -3313,32 +3293,54 @@ ${agentConfig.name}:`);
   if (!config[key]) {
     config[key] = {};
   }
-  let added = 0;
-  let updated = 0;
-  for (const stackName of stacks) {
-    const entry = buildMcpEntry(stackName, agentId);
-    const existing = config[key][stackName];
-    if (!existing) {
-      config[key][stackName] = entry;
-      added++;
-    } else if (existing.command !== entry.command || JSON.stringify(existing.args) !== JSON.stringify(entry.args)) {
-      config[key][stackName] = entry;
-      updated++;
+  const rudiMcpShimPath = path9.join(import_env6.PATHS.home, "shims", "rudi-mcp");
+  const removedEntries = [];
+  for (const [serverName, serverConfig] of Object.entries(config[key])) {
+    if (serverConfig.command === rudiMcpShimPath) {
+      delete config[key][serverName];
+      removedEntries.push(serverName);
     }
   }
-  if (added > 0 || updated > 0) {
-    writeJsonConfig(targetPath, config);
-    console.log(`  Added: ${added}, Updated: ${updated}`);
-  } else {
-    console.log(`  Already up to date`);
+  if (removedEntries.length > 0) {
+    console.log(`  Removed old entries: ${removedEntries.join(", ")}`);
   }
-  return { success: true, added, updated };
+  const routerEntry = buildRouterEntry(agentId);
+  const existing = config[key]["rudi"];
+  let action = "none";
+  if (!existing) {
+    config[key]["rudi"] = routerEntry;
+    action = "added";
+  } else if (existing.command !== routerEntry.command || JSON.stringify(existing.args) !== JSON.stringify(routerEntry.args)) {
+    config[key]["rudi"] = routerEntry;
+    action = "updated";
+  }
+  if (action !== "none" || removedEntries.length > 0) {
+    writeJsonConfig(targetPath, config);
+    if (action !== "none") {
+      console.log(`  ${action === "added" ? "\u2713 Added" : "\u2713 Updated"} rudi router`);
+    }
+  } else {
+    console.log(`  \u2713 Already configured`);
+  }
+  return { success: true, action, removed: removedEntries };
 }
 async function cmdIntegrate(args, flags) {
   const target = args[0];
+  if (flags.list || target === "list") {
+    const installed = (0, import_mcp4.getInstalledAgents)();
+    console.log("\nDetected agents:");
+    for (const agent of installed) {
+      console.log(`  \u2713 ${agent.name}`);
+      console.log(`    ${agent.configFile}`);
+    }
+    if (installed.length === 0) {
+      console.log("  (none detected)");
+    }
+    return;
+  }
   if (!target) {
     console.log(`
-rudi integrate - Wire RUDI stacks into agent configs
+rudi integrate - Wire RUDI router into agent configs
 
 USAGE
   rudi integrate <agent>     Integrate with specific agent
@@ -3364,29 +3366,14 @@ EXAMPLES
 `);
     return;
   }
-  if (flags.list || target === "list") {
-    const installed = (0, import_mcp4.getInstalledAgents)();
-    console.log("\nDetected agents:");
-    for (const agent of installed) {
-      console.log(`  \u2713 ${agent.name}`);
-      console.log(`    ${agent.configFile}`);
-    }
-    if (installed.length === 0) {
-      console.log("  (none detected)");
-    }
-    return;
-  }
-  const stacks = getInstalledStacks();
-  if (stacks.length === 0) {
-    console.log("No stacks installed. Install with: rudi install <stack>");
+  try {
+    checkRouterShim();
+  } catch (err) {
+    console.error(err.message);
     return;
   }
   console.log(`
-Integrating ${stacks.length} stack(s)...`);
-  const shimResult = ensureShim();
-  if (shimResult.created) {
-    console.log(`Created shim: ${shimResult.path}`);
-  }
+Wiring up RUDI router...`);
   let targetAgents = [];
   if (target === "all") {
     targetAgents = (0, import_mcp4.getInstalledAgents)().map((a) => a.id);
@@ -3416,25 +3403,25 @@ Integrating ${stacks.length} stack(s)...`);
     targetAgents = [agentId];
   }
   if (flags["dry-run"]) {
-    console.log("\nDry run - would integrate:");
+    console.log("\nDry run - would add RUDI router to:");
     for (const agentId of targetAgents) {
       const agent = import_mcp4.AGENT_CONFIGS.find((a) => a.id === agentId);
-      console.log(`  ${agent?.name || agentId}:`);
-      for (const stack of stacks) {
-        console.log(`    - ${stack}`);
-      }
+      console.log(`  ${agent?.name || agentId}`);
     }
     return;
   }
   const results = [];
   for (const agentId of targetAgents) {
-    const result = await integrateAgent(agentId, stacks, flags);
+    const result = await integrateAgent(agentId, flags);
     results.push({ agent: agentId, ...result });
   }
   const successful = results.filter((r) => r.success);
   console.log(`
 \u2713 Integrated with ${successful.length} agent(s)`);
-  console.log("\nRestart your agent(s) to use the new stacks.");
+  console.log("\nRestart your agent(s) to access all installed stacks.");
+  console.log("\nManage stacks:");
+  console.log("  rudi install <stack>   # Install a new stack");
+  console.log("  rudi index             # Rebuild tool cache");
 }
 
 // src/commands/migrate.js
@@ -3445,7 +3432,7 @@ var import_env7 = require("@learnrudi/env");
 var import_mcp5 = require("@learnrudi/mcp");
 var HOME2 = import_os3.default.homedir();
 var OLD_PROMPT_STACK = path10.join(HOME2, ".prompt-stack");
-var SHIM_PATH2 = path10.join(import_env7.PATHS.home, "shims", "rudi-mcp");
+var SHIM_PATH = path10.join(import_env7.PATHS.home, "shims", "rudi-mcp");
 function getOldStacks() {
   const stacksDir = path10.join(OLD_PROMPT_STACK, "stacks");
   if (!fs12.existsSync(stacksDir)) return [];
@@ -3481,8 +3468,8 @@ function copyRecursive(src, dest) {
     fs12.copyFileSync(src, dest);
   }
 }
-function ensureShim2() {
-  const shimsDir = path10.dirname(SHIM_PATH2);
+function ensureShim() {
+  const shimsDir = path10.dirname(SHIM_PATH);
   if (!fs12.existsSync(shimsDir)) {
     fs12.mkdirSync(shimsDir, { recursive: true });
   }
@@ -3494,11 +3481,11 @@ else
   exec npx --yes @learnrudi/cli mcp "$1"
 fi
 `;
-  fs12.writeFileSync(SHIM_PATH2, shimContent, { mode: 493 });
+  fs12.writeFileSync(SHIM_PATH, shimContent, { mode: 493 });
 }
 function buildNewEntry(stackName, agentId) {
   const base = {
-    command: SHIM_PATH2,
+    command: SHIM_PATH,
     args: [stackName]
   };
   if (agentId === "claude-desktop" || agentId === "claude-code") {
@@ -3676,8 +3663,8 @@ Stacks migrated to: ${import_env7.PATHS.stacks}`);
 async function migrateConfigs(flags) {
   console.log("=== Updating Agent Configs ===\n");
   if (!flags.dryRun) {
-    ensureShim2();
-    console.log(`Shim ready: ${SHIM_PATH2}
+    ensureShim();
+    console.log(`Shim ready: ${SHIM_PATH}
 `);
   }
   let installedStacks = [];
@@ -3847,6 +3834,452 @@ After configuring secrets, run: rudi index`);
   }
 }
 
+// src/commands/status.js
+var import_core12 = require("@learnrudi/core");
+var import_child_process7 = require("child_process");
+var import_fs10 = __toESM(require("fs"), 1);
+var import_path7 = __toESM(require("path"), 1);
+var import_os4 = __toESM(require("os"), 1);
+var AGENTS = [
+  {
+    id: "claude",
+    name: "Claude Code",
+    npmPackage: "@anthropic-ai/claude-code",
+    credentialType: "keychain",
+    keychainService: "Claude Code-credentials"
+  },
+  {
+    id: "codex",
+    name: "OpenAI Codex",
+    npmPackage: "@openai/codex",
+    credentialType: "file",
+    credentialPath: "~/.codex/auth.json"
+  },
+  {
+    id: "gemini",
+    name: "Gemini CLI",
+    npmPackage: "@google/gemini-cli",
+    credentialType: "file",
+    credentialPath: "~/.gemini/google_accounts.json"
+  },
+  {
+    id: "copilot",
+    name: "GitHub Copilot",
+    npmPackage: "@githubnext/github-copilot-cli",
+    credentialType: "file",
+    credentialPath: "~/.config/github-copilot/hosts.json"
+  }
+];
+var RUNTIMES = [
+  { id: "node", name: "Node.js", command: "node", versionFlag: "--version" },
+  { id: "python", name: "Python", command: "python3", versionFlag: "--version" },
+  { id: "deno", name: "Deno", command: "deno", versionFlag: "--version" },
+  { id: "bun", name: "Bun", command: "bun", versionFlag: "--version" }
+];
+var BINARIES = [
+  { id: "ffmpeg", name: "FFmpeg", command: "ffmpeg", versionFlag: "-version" },
+  { id: "ripgrep", name: "ripgrep", command: "rg", versionFlag: "--version" },
+  { id: "git", name: "Git", command: "git", versionFlag: "--version" },
+  { id: "pandoc", name: "Pandoc", command: "pandoc", versionFlag: "--version" },
+  { id: "jq", name: "jq", command: "jq", versionFlag: "--version" }
+];
+function fileExists(filePath) {
+  const resolved = filePath.replace("~", import_os4.default.homedir());
+  return import_fs10.default.existsSync(resolved);
+}
+function checkKeychain(service) {
+  if (process.platform !== "darwin") return false;
+  try {
+    (0, import_child_process7.execSync)(`security find-generic-password -s "${service}"`, {
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function getVersion(command, versionFlag) {
+  try {
+    const output = (0, import_child_process7.execSync)(`${command} ${versionFlag} 2>&1`, {
+      encoding: "utf-8",
+      timeout: 5e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const match = output.match(/(\d+\.\d+\.?\d*)/);
+    return match ? match[1] : output.trim().split("\n")[0].slice(0, 50);
+  } catch {
+    return null;
+  }
+}
+function findBinary(command, kind = "binary") {
+  const rudiPaths = [
+    import_path7.default.join(import_core12.PATHS.agents, command, "node_modules", ".bin", command),
+    import_path7.default.join(import_core12.PATHS.runtimes, command, "bin", command),
+    import_path7.default.join(import_core12.PATHS.binaries, command, command),
+    import_path7.default.join(import_core12.PATHS.binaries, command)
+  ];
+  for (const p of rudiPaths) {
+    if (import_fs10.default.existsSync(p)) {
+      return { found: true, path: p, source: "rudi" };
+    }
+  }
+  try {
+    const output = (0, import_child_process7.execSync)(`which ${command} 2>/dev/null`, {
+      encoding: "utf-8",
+      timeout: 3e3
+    });
+    const globalPath = output.trim();
+    if (globalPath) {
+      return { found: true, path: globalPath, source: "global" };
+    }
+  } catch {
+  }
+  return { found: false, path: null, source: null };
+}
+function getAgentStatus(agent) {
+  const binaryPath = import_path7.default.join(import_core12.PATHS.agents, agent.id, "node_modules", ".bin", agent.id);
+  const installed = import_fs10.default.existsSync(binaryPath);
+  let authenticated = false;
+  if (agent.credentialType === "keychain") {
+    authenticated = checkKeychain(agent.keychainService);
+  } else if (agent.credentialType === "file") {
+    authenticated = fileExists(agent.credentialPath);
+  }
+  let version = null;
+  if (installed) {
+    version = getVersion(binaryPath, "--version");
+  }
+  return {
+    id: agent.id,
+    name: agent.name,
+    installed,
+    authenticated,
+    version,
+    path: installed ? binaryPath : null,
+    ready: installed && authenticated
+  };
+}
+function getRuntimeStatus(runtime) {
+  const location = findBinary(runtime.command, "runtime");
+  const version = location.found ? getVersion(location.path, runtime.versionFlag) : null;
+  return {
+    id: runtime.id,
+    name: runtime.name,
+    installed: location.found,
+    version,
+    path: location.path,
+    source: location.source
+  };
+}
+function getBinaryStatus(binary) {
+  const location = findBinary(binary.command, "binary");
+  const version = location.found ? getVersion(location.path, binary.versionFlag) : null;
+  return {
+    id: binary.id,
+    name: binary.name,
+    installed: location.found,
+    version,
+    path: location.path,
+    source: location.source
+  };
+}
+async function getFullStatus() {
+  const agents = AGENTS.map(getAgentStatus);
+  const runtimes = RUNTIMES.map(getRuntimeStatus);
+  const binaries = BINARIES.map(getBinaryStatus);
+  let stacks = [];
+  let prompts = [];
+  try {
+    stacks = (0, import_core12.getInstalledPackages)("stack").map((s) => ({
+      id: s.id,
+      name: s.name,
+      version: s.version
+    }));
+    prompts = (0, import_core12.getInstalledPackages)("prompt").map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category
+    }));
+  } catch {
+  }
+  const directories = {
+    home: { path: import_core12.PATHS.home, exists: import_fs10.default.existsSync(import_core12.PATHS.home) },
+    stacks: { path: import_core12.PATHS.stacks, exists: import_fs10.default.existsSync(import_core12.PATHS.stacks) },
+    agents: { path: import_core12.PATHS.agents, exists: import_fs10.default.existsSync(import_core12.PATHS.agents) },
+    runtimes: { path: import_core12.PATHS.runtimes, exists: import_fs10.default.existsSync(import_core12.PATHS.runtimes) },
+    binaries: { path: import_core12.PATHS.binaries, exists: import_fs10.default.existsSync(import_core12.PATHS.binaries) },
+    db: { path: import_core12.PATHS.db, exists: import_fs10.default.existsSync(import_core12.PATHS.db) }
+  };
+  const summary = {
+    agentsInstalled: agents.filter((a) => a.installed).length,
+    agentsReady: agents.filter((a) => a.ready).length,
+    agentsTotal: agents.length,
+    runtimesInstalled: runtimes.filter((r) => r.installed).length,
+    runtimesTotal: runtimes.length,
+    binariesInstalled: binaries.filter((b) => b.installed).length,
+    binariesTotal: binaries.length,
+    stacksInstalled: stacks.length,
+    promptsInstalled: prompts.length
+  };
+  return {
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    platform: `${process.platform}-${process.arch}`,
+    rudiHome: import_core12.PATHS.home,
+    summary,
+    agents,
+    runtimes,
+    binaries,
+    stacks,
+    prompts,
+    directories
+  };
+}
+function printStatus(status, filter) {
+  console.log("RUDI Status");
+  console.log("=".repeat(50));
+  console.log(`Platform: ${status.platform}`);
+  console.log(`RUDI Home: ${status.rudiHome}`);
+  console.log("");
+  if (!filter || filter === "agents") {
+    console.log(`AGENTS (${status.summary.agentsReady}/${status.summary.agentsTotal} ready)`);
+    console.log("-".repeat(50));
+    for (const agent of status.agents) {
+      const installIcon = agent.installed ? "\x1B[32m\u2713\x1B[0m" : "\x1B[31m\u2717\x1B[0m";
+      const authIcon = agent.authenticated ? "\x1B[32m\u2713\x1B[0m" : "\x1B[33m\u25CB\x1B[0m";
+      const version = agent.version ? `v${agent.version}` : "";
+      console.log(`  ${installIcon} ${agent.name} ${version}`);
+      console.log(`    Installed: ${agent.installed ? "yes" : "no"}, Auth: ${agent.authenticated ? "yes" : "no"}`);
+    }
+    console.log("");
+  }
+  if (!filter || filter === "runtimes") {
+    console.log(`RUNTIMES (${status.summary.runtimesInstalled}/${status.summary.runtimesTotal})`);
+    console.log("-".repeat(50));
+    for (const rt of status.runtimes) {
+      const icon = rt.installed ? "\x1B[32m\u2713\x1B[0m" : "\x1B[90m\u25CB\x1B[0m";
+      const version = rt.version ? `v${rt.version}` : "";
+      const source = rt.source ? `(${rt.source})` : "";
+      console.log(`  ${icon} ${rt.name} ${version} ${source}`);
+    }
+    console.log("");
+  }
+  if (!filter || filter === "binaries") {
+    console.log(`BINARIES (${status.summary.binariesInstalled}/${status.summary.binariesTotal})`);
+    console.log("-".repeat(50));
+    for (const bin of status.binaries) {
+      const icon = bin.installed ? "\x1B[32m\u2713\x1B[0m" : "\x1B[90m\u25CB\x1B[0m";
+      const version = bin.version ? `v${bin.version}` : "";
+      const source = bin.source ? `(${bin.source})` : "";
+      console.log(`  ${icon} ${bin.name} ${version} ${source}`);
+    }
+    console.log("");
+  }
+  if (!filter || filter === "stacks") {
+    console.log(`STACKS (${status.summary.stacksInstalled})`);
+    console.log("-".repeat(50));
+    if (status.stacks.length === 0) {
+      console.log("  No stacks installed");
+    } else {
+      for (const stack of status.stacks) {
+        console.log(`  ${stack.id} v${stack.version || "?"}`);
+      }
+    }
+    console.log("");
+  }
+  console.log("SUMMARY");
+  console.log("-".repeat(50));
+  console.log(`  Agents ready: ${status.summary.agentsReady}/${status.summary.agentsTotal}`);
+  console.log(`  Runtimes: ${status.summary.runtimesInstalled}/${status.summary.runtimesTotal}`);
+  console.log(`  Binaries: ${status.summary.binariesInstalled}/${status.summary.binariesTotal}`);
+  console.log(`  Stacks: ${status.summary.stacksInstalled}`);
+  console.log(`  Prompts: ${status.summary.promptsInstalled}`);
+}
+async function cmdStatus(args, flags) {
+  const filter = args[0];
+  const status = await getFullStatus();
+  if (flags.json) {
+    if (filter) {
+      const filtered = {
+        timestamp: status.timestamp,
+        platform: status.platform,
+        [filter]: status[filter]
+      };
+      console.log(JSON.stringify(filtered, null, 2));
+    } else {
+      console.log(JSON.stringify(status, null, 2));
+    }
+  } else {
+    printStatus(status, filter);
+  }
+}
+
+// src/commands/check.js
+var import_core13 = require("@learnrudi/core");
+var import_child_process8 = require("child_process");
+var import_fs11 = __toESM(require("fs"), 1);
+var import_path8 = __toESM(require("path"), 1);
+var import_os5 = __toESM(require("os"), 1);
+var AGENT_CREDENTIALS = {
+  claude: { type: "keychain", service: "Claude Code-credentials" },
+  codex: { type: "file", path: "~/.codex/auth.json" },
+  gemini: { type: "file", path: "~/.gemini/google_accounts.json" },
+  copilot: { type: "file", path: "~/.config/github-copilot/hosts.json" }
+};
+function fileExists2(filePath) {
+  const resolved = filePath.replace("~", import_os5.default.homedir());
+  return import_fs11.default.existsSync(resolved);
+}
+function checkKeychain2(service) {
+  if (process.platform !== "darwin") return false;
+  try {
+    (0, import_child_process8.execSync)(`security find-generic-password -s "${service}"`, {
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function getVersion2(binaryPath, versionFlag = "--version") {
+  try {
+    const output = (0, import_child_process8.execSync)(`"${binaryPath}" ${versionFlag} 2>&1`, {
+      encoding: "utf-8",
+      timeout: 5e3
+    });
+    const match = output.match(/(\d+\.\d+\.?\d*)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+async function cmdCheck(args, flags) {
+  const packageId = args[0];
+  if (!packageId) {
+    console.error("Usage: rudi check <package-id>");
+    console.error("Examples:");
+    console.error("  rudi check agent:claude");
+    console.error("  rudi check runtime:python");
+    console.error("  rudi check binary:ffmpeg");
+    console.error("  rudi check stack:slack");
+    process.exit(1);
+  }
+  let kind, name;
+  if (packageId.includes(":")) {
+    [kind, name] = packageId.split(":");
+  } else {
+    if (["claude", "codex", "gemini", "copilot"].includes(packageId)) {
+      kind = "agent";
+      name = packageId;
+    } else if (["node", "python", "deno", "bun"].includes(packageId)) {
+      kind = "runtime";
+      name = packageId;
+    } else {
+      kind = "stack";
+      name = packageId;
+    }
+  }
+  const result = {
+    id: `${kind}:${name}`,
+    kind,
+    name,
+    installed: false,
+    authenticated: null,
+    // Only for agents
+    ready: false,
+    path: null,
+    version: null
+  };
+  switch (kind) {
+    case "agent": {
+      const binaryPath = import_path8.default.join(import_core13.PATHS.agents, name, "node_modules", ".bin", name);
+      result.installed = import_fs11.default.existsSync(binaryPath);
+      result.path = result.installed ? binaryPath : null;
+      if (result.installed) {
+        result.version = getVersion2(binaryPath);
+      }
+      const cred = AGENT_CREDENTIALS[name];
+      if (cred) {
+        if (cred.type === "keychain") {
+          result.authenticated = checkKeychain2(cred.service);
+        } else if (cred.type === "file") {
+          result.authenticated = fileExists2(cred.path);
+        }
+      }
+      result.ready = result.installed && result.authenticated;
+      break;
+    }
+    case "runtime": {
+      const rudiPath = import_path8.default.join(import_core13.PATHS.runtimes, name, "bin", name);
+      if (import_fs11.default.existsSync(rudiPath)) {
+        result.installed = true;
+        result.path = rudiPath;
+        result.version = getVersion2(rudiPath);
+      } else {
+        try {
+          const globalPath = (0, import_child_process8.execSync)(`which ${name} 2>/dev/null`, { encoding: "utf-8" }).trim();
+          if (globalPath) {
+            result.installed = true;
+            result.path = globalPath;
+            result.version = getVersion2(globalPath);
+          }
+        } catch {
+        }
+      }
+      result.ready = result.installed;
+      break;
+    }
+    case "binary": {
+      const rudiPath = import_path8.default.join(import_core13.PATHS.binaries, name, name);
+      if (import_fs11.default.existsSync(rudiPath)) {
+        result.installed = true;
+        result.path = rudiPath;
+      } else {
+        try {
+          const globalPath = (0, import_child_process8.execSync)(`which ${name} 2>/dev/null`, { encoding: "utf-8" }).trim();
+          if (globalPath) {
+            result.installed = true;
+            result.path = globalPath;
+          }
+        } catch {
+        }
+      }
+      result.ready = result.installed;
+      break;
+    }
+    case "stack": {
+      result.installed = (0, import_core13.isPackageInstalled)(`stack:${name}`);
+      if (result.installed) {
+        result.path = (0, import_core13.getPackagePath)(`stack:${name}`);
+      }
+      result.ready = result.installed;
+      break;
+    }
+    default:
+      console.error(`Unknown package kind: ${kind}`);
+      process.exit(1);
+  }
+  if (flags.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    const installIcon = result.installed ? "\x1B[32m\u2713\x1B[0m" : "\x1B[31m\u2717\x1B[0m";
+    console.log(`${installIcon} ${result.id}`);
+    console.log(`  Installed: ${result.installed}`);
+    if (result.path) console.log(`  Path: ${result.path}`);
+    if (result.version) console.log(`  Version: ${result.version}`);
+    if (result.authenticated !== null) {
+      console.log(`  Authenticated: ${result.authenticated}`);
+    }
+    console.log(`  Ready: ${result.ready}`);
+  }
+  if (!result.installed) {
+    process.exit(1);
+  } else if (result.authenticated === false) {
+    process.exit(2);
+  } else {
+    process.exit(0);
+  }
+}
+
 // src/index.js
 var VERSION = "2.0.0";
 async function main() {
@@ -3894,7 +4327,6 @@ async function main() {
         await cmdImport(args, flags);
         break;
       case "doctor":
-      case "check":
         await cmdDoctor(args, flags);
         break;
       case "init":
@@ -3932,8 +4364,13 @@ async function main() {
         await cmdIndex(args, flags);
         break;
       case "home":
-      case "status":
         await cmdHome(args, flags);
+        break;
+      case "status":
+        await cmdStatus(args, flags);
+        break;
+      case "check":
+        await cmdCheck(args, flags);
         break;
       // Shortcuts for listing specific package types
       case "stacks":
