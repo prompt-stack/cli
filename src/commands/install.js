@@ -96,19 +96,28 @@ async function installDependencies(stackPath, manifest) {
       return { installed: true };
 
     } else if (runtime === 'python') {
-      // Check for requirements.txt
-      const requirementsPath = path.join(stackPath, 'requirements.txt');
+      // Check for requirements.txt (try python/ subdir first, then root)
+      let requirementsPath = path.join(stackPath, 'python', 'requirements.txt');
+      let reqCwd = path.join(stackPath, 'python');
+
       try {
         await fs.access(requirementsPath);
       } catch {
-        return { installed: false, reason: 'No requirements.txt' };
+        // Fall back to root level
+        requirementsPath = path.join(stackPath, 'requirements.txt');
+        reqCwd = stackPath;
+        try {
+          await fs.access(requirementsPath);
+        } catch {
+          return { installed: false, reason: 'No requirements.txt' };
+        }
       }
 
       // Use bundled pip if available
       const pipCmd = getBundledBinary('python', 'pip');
       console.log(`  Installing pip dependencies...`);
       execSync(`"${pipCmd}" install -r requirements.txt`, {
-        cwd: stackPath,
+        cwd: reqCwd,
         stdio: 'pipe',
       });
       return { installed: true };
