@@ -1,0 +1,369 @@
+/**
+ * Status command - system status for Studio integration
+ *
+ * Returns comprehensive status of all packages, runtimes, and credentials.
+ * Designed for Studio to call at startup: `rudi status --json`
+ *
+ * Usage:
+ *   rudi status           Human-readable status
+ *   rudi status --json    JSON for Studio consumption
+ *   rudi status agents    Status of agents only
+ *   rudi status runtimes  Status of runtimes only
+ */
+
+import { PATHS, getInstalledPackages, isPackageInstalled } from '@learnrudi/core';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+// Agent definitions with credential check info
+const AGENTS = [
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    npmPackage: '@anthropic-ai/claude-code',
+    credentialType: 'keychain',
+    keychainService: 'Claude Code-credentials',
+  },
+  {
+    id: 'codex',
+    name: 'OpenAI Codex',
+    npmPackage: '@openai/codex',
+    credentialType: 'file',
+    credentialPath: '~/.codex/auth.json',
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini CLI',
+    npmPackage: '@google/gemini-cli',
+    credentialType: 'file',
+    credentialPath: '~/.gemini/google_accounts.json',
+  },
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    npmPackage: '@githubnext/github-copilot-cli',
+    credentialType: 'file',
+    credentialPath: '~/.config/github-copilot/hosts.json',
+  },
+];
+
+// Runtime definitions
+const RUNTIMES = [
+  { id: 'node', name: 'Node.js', command: 'node', versionFlag: '--version' },
+  { id: 'python', name: 'Python', command: 'python3', versionFlag: '--version' },
+  { id: 'deno', name: 'Deno', command: 'deno', versionFlag: '--version' },
+  { id: 'bun', name: 'Bun', command: 'bun', versionFlag: '--version' },
+];
+
+// Binary definitions
+const BINARIES = [
+  { id: 'ffmpeg', name: 'FFmpeg', command: 'ffmpeg', versionFlag: '-version' },
+  { id: 'ripgrep', name: 'ripgrep', command: 'rg', versionFlag: '--version' },
+  { id: 'git', name: 'Git', command: 'git', versionFlag: '--version' },
+  { id: 'pandoc', name: 'Pandoc', command: 'pandoc', versionFlag: '--version' },
+  { id: 'jq', name: 'jq', command: 'jq', versionFlag: '--version' },
+];
+
+/**
+ * Check if a file exists
+ */
+function fileExists(filePath) {
+  const resolved = filePath.replace('~', os.homedir());
+  return fs.existsSync(resolved);
+}
+
+/**
+ * Check macOS keychain for credential
+ */
+function checkKeychain(service) {
+  if (process.platform !== 'darwin') return false;
+  try {
+    execSync(`security find-generic-password -s "${service}"`, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get version of a command
+ */
+function getVersion(command, versionFlag) {
+  try {
+    const output = execSync(`${command} ${versionFlag} 2>&1`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Extract version number (first match of semver-like pattern)
+    const match = output.match(/(\d+\.\d+\.?\d*)/);
+    return match ? match[1] : output.trim().split('\n')[0].slice(0, 50);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if binary exists in PATH or RUDI locations
+ */
+function findBinary(command, kind = 'binary') {
+  // Check RUDI locations first
+  const rudiPaths = [
+    path.join(PATHS.agents, command, 'node_modules', '.bin', command),
+    path.join(PATHS.runtimes, command, 'bin', command),
+    path.join(PATHS.binaries, command, command),
+    path.join(PATHS.binaries, command),
+  ];
+
+  for (const p of rudiPaths) {
+    if (fs.existsSync(p)) {
+      return { found: true, path: p, source: 'rudi' };
+    }
+  }
+
+  // Check global PATH
+  try {
+    const output = execSync(`which ${command} 2>/dev/null`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    const globalPath = output.trim();
+    if (globalPath) {
+      return { found: true, path: globalPath, source: 'global' };
+    }
+  } catch {
+    // Not found in PATH
+  }
+
+  return { found: false, path: null, source: null };
+}
+
+/**
+ * Get agent status
+ */
+function getAgentStatus(agent) {
+  // Check if installed
+  const binaryPath = path.join(PATHS.agents, agent.id, 'node_modules', '.bin', agent.id);
+  const installed = fs.existsSync(binaryPath);
+
+  // Check credentials
+  let authenticated = false;
+  if (agent.credentialType === 'keychain') {
+    authenticated = checkKeychain(agent.keychainService);
+  } else if (agent.credentialType === 'file') {
+    authenticated = fileExists(agent.credentialPath);
+  }
+
+  // Get version if installed
+  let version = null;
+  if (installed) {
+    version = getVersion(binaryPath, '--version');
+  }
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    installed,
+    authenticated,
+    version,
+    path: installed ? binaryPath : null,
+    ready: installed && authenticated,
+  };
+}
+
+/**
+ * Get runtime status
+ */
+function getRuntimeStatus(runtime) {
+  const location = findBinary(runtime.command, 'runtime');
+  const version = location.found ? getVersion(location.path, runtime.versionFlag) : null;
+
+  return {
+    id: runtime.id,
+    name: runtime.name,
+    installed: location.found,
+    version,
+    path: location.path,
+    source: location.source,
+  };
+}
+
+/**
+ * Get binary status
+ */
+function getBinaryStatus(binary) {
+  const location = findBinary(binary.command, 'binary');
+  const version = location.found ? getVersion(location.path, binary.versionFlag) : null;
+
+  return {
+    id: binary.id,
+    name: binary.name,
+    installed: location.found,
+    version,
+    path: location.path,
+    source: location.source,
+  };
+}
+
+/**
+ * Get full system status
+ */
+async function getFullStatus() {
+  const agents = AGENTS.map(getAgentStatus);
+  const runtimes = RUNTIMES.map(getRuntimeStatus);
+  const binaries = BINARIES.map(getBinaryStatus);
+
+  // Get installed stacks and prompts
+  let stacks = [];
+  let prompts = [];
+  try {
+    stacks = getInstalledPackages('stack').map(s => ({
+      id: s.id,
+      name: s.name,
+      version: s.version,
+    }));
+    prompts = getInstalledPackages('prompt').map(p => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+    }));
+  } catch {
+    // Database might not be initialized
+  }
+
+  // Check directories
+  const directories = {
+    home: { path: PATHS.home, exists: fs.existsSync(PATHS.home) },
+    stacks: { path: PATHS.stacks, exists: fs.existsSync(PATHS.stacks) },
+    agents: { path: PATHS.agents, exists: fs.existsSync(PATHS.agents) },
+    runtimes: { path: PATHS.runtimes, exists: fs.existsSync(PATHS.runtimes) },
+    binaries: { path: PATHS.binaries, exists: fs.existsSync(PATHS.binaries) },
+    db: { path: PATHS.db, exists: fs.existsSync(PATHS.db) },
+  };
+
+  // Summary counts
+  const summary = {
+    agentsInstalled: agents.filter(a => a.installed).length,
+    agentsReady: agents.filter(a => a.ready).length,
+    agentsTotal: agents.length,
+    runtimesInstalled: runtimes.filter(r => r.installed).length,
+    runtimesTotal: runtimes.length,
+    binariesInstalled: binaries.filter(b => b.installed).length,
+    binariesTotal: binaries.length,
+    stacksInstalled: stacks.length,
+    promptsInstalled: prompts.length,
+  };
+
+  return {
+    timestamp: new Date().toISOString(),
+    platform: `${process.platform}-${process.arch}`,
+    rudiHome: PATHS.home,
+    summary,
+    agents,
+    runtimes,
+    binaries,
+    stacks,
+    prompts,
+    directories,
+  };
+}
+
+/**
+ * Print human-readable status
+ */
+function printStatus(status, filter) {
+  console.log('RUDI Status');
+  console.log('=' .repeat(50));
+  console.log(`Platform: ${status.platform}`);
+  console.log(`RUDI Home: ${status.rudiHome}`);
+  console.log('');
+
+  // Agents
+  if (!filter || filter === 'agents') {
+    console.log(`AGENTS (${status.summary.agentsReady}/${status.summary.agentsTotal} ready)`);
+    console.log('-'.repeat(50));
+    for (const agent of status.agents) {
+      const installIcon = agent.installed ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
+      const authIcon = agent.authenticated ? '\x1b[32m✓\x1b[0m' : '\x1b[33m○\x1b[0m';
+      const version = agent.version ? `v${agent.version}` : '';
+      console.log(`  ${installIcon} ${agent.name} ${version}`);
+      console.log(`    Installed: ${agent.installed ? 'yes' : 'no'}, Auth: ${agent.authenticated ? 'yes' : 'no'}`);
+    }
+    console.log('');
+  }
+
+  // Runtimes
+  if (!filter || filter === 'runtimes') {
+    console.log(`RUNTIMES (${status.summary.runtimesInstalled}/${status.summary.runtimesTotal})`);
+    console.log('-'.repeat(50));
+    for (const rt of status.runtimes) {
+      const icon = rt.installed ? '\x1b[32m✓\x1b[0m' : '\x1b[90m○\x1b[0m';
+      const version = rt.version ? `v${rt.version}` : '';
+      const source = rt.source ? `(${rt.source})` : '';
+      console.log(`  ${icon} ${rt.name} ${version} ${source}`);
+    }
+    console.log('');
+  }
+
+  // Binaries
+  if (!filter || filter === 'binaries') {
+    console.log(`BINARIES (${status.summary.binariesInstalled}/${status.summary.binariesTotal})`);
+    console.log('-'.repeat(50));
+    for (const bin of status.binaries) {
+      const icon = bin.installed ? '\x1b[32m✓\x1b[0m' : '\x1b[90m○\x1b[0m';
+      const version = bin.version ? `v${bin.version}` : '';
+      const source = bin.source ? `(${bin.source})` : '';
+      console.log(`  ${icon} ${bin.name} ${version} ${source}`);
+    }
+    console.log('');
+  }
+
+  // Stacks
+  if (!filter || filter === 'stacks') {
+    console.log(`STACKS (${status.summary.stacksInstalled})`);
+    console.log('-'.repeat(50));
+    if (status.stacks.length === 0) {
+      console.log('  No stacks installed');
+    } else {
+      for (const stack of status.stacks) {
+        console.log(`  ${stack.id} v${stack.version || '?'}`);
+      }
+    }
+    console.log('');
+  }
+
+  // Summary
+  console.log('SUMMARY');
+  console.log('-'.repeat(50));
+  console.log(`  Agents ready: ${status.summary.agentsReady}/${status.summary.agentsTotal}`);
+  console.log(`  Runtimes: ${status.summary.runtimesInstalled}/${status.summary.runtimesTotal}`);
+  console.log(`  Binaries: ${status.summary.binariesInstalled}/${status.summary.binariesTotal}`);
+  console.log(`  Stacks: ${status.summary.stacksInstalled}`);
+  console.log(`  Prompts: ${status.summary.promptsInstalled}`);
+}
+
+export async function cmdStatus(args, flags) {
+  const filter = args[0]; // Optional filter: agents, runtimes, binaries, stacks
+
+  const status = await getFullStatus();
+
+  if (flags.json) {
+    // Filter output if requested
+    if (filter) {
+      const filtered = {
+        timestamp: status.timestamp,
+        platform: status.platform,
+        [filter]: status[filter],
+      };
+      console.log(JSON.stringify(filtered, null, 2));
+    } else {
+      console.log(JSON.stringify(status, null, 2));
+    }
+  } else {
+    printStatus(status, filter);
+  }
+}

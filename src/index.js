@@ -44,6 +44,8 @@ import { cmdMcp } from './commands/mcp.js';
 import { cmdIntegrate } from './commands/integrate.js';
 import { cmdMigrate } from './commands/migrate.js';
 import { cmdIndex } from './commands/index-tools.js';
+import { cmdStatus } from './commands/status.js';
+import { cmdCheck } from './commands/check.js';
 
 const VERSION = '2.0.0';
 
@@ -104,7 +106,6 @@ async function main() {
         break;
 
       case 'doctor':
-      case 'check':
         await cmdDoctor(args, flags);
         break;
 
@@ -152,8 +153,15 @@ async function main() {
         break;
 
       case 'home':
-      case 'status':
         await cmdHome(args, flags);
+        break;
+
+      case 'status':
+        await cmdStatus(args, flags);
+        break;
+
+      case 'check':
+        await cmdCheck(args, flags);
         break;
 
       // Shortcuts for listing specific package types
