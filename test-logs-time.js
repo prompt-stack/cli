@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Test script for pstack logs time filtering
+ * Test script for rudi logs time filtering
  */
 
 import { cmdLogs } from './src/commands/logs.js';
@@ -19,7 +19,7 @@ await cmdLogs([], { last: '1h', limit: 10 });
 
 // Test count
 console.log('\n\nTest 4: Total log count');
-import { getLogCount } from './db/logs.js';
-import { getDb } from './db/index.js';
+import { getLogCount } from '@learnrudi/db/logs';
+import { getDb } from '@learnrudi/db';
 const count = getLogCount(getDb());
 console.log(`Total logs in database: ${count}`);

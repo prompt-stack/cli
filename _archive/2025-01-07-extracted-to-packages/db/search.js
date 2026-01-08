@@ -1,5 +1,5 @@
 /**
- * Search module for pstack CLI
+ * Search module for RUDI CLI
  * Provides full-text search using SQLite FTS5
  */
 

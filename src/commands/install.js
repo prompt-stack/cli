@@ -1,11 +1,20 @@
 /**
  * Install command - install packages from registry
+ *
+ * Checks manifest for all dependencies:
+ * - Runtime (node, python, deno, bun)
+ * - Binaries (ffmpeg, ripgrep, etc.)
+ * - Secrets (API keys, tokens)
+ *
+ * Then installs and registers to all detected AI agents.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { installPackage, resolvePackage } from '@prompt-stack/core';
-import { registerMcpAll } from '../utils/mcp-registry.js';
+import { execSync } from 'child_process';
+import { installPackage, resolvePackage, checkAllDependencies, formatDependencyResults } from '@learnrudi/core';
+import { hasSecret, listSecrets, setSecret, getSecret } from '@learnrudi/secrets';
+import { getInstalledAgents } from '@learnrudi/mcp';
 
 /**
  * Load manifest from installed stack path
@@ -21,70 +30,185 @@ async function loadManifest(installPath) {
 }
 
 /**
- * Create .env file with placeholders from manifest.secrets
+ * Get path to bundled runtime binary
  */
-async function createEnvFile(installPath, manifest) {
-  if (!manifest?.secrets?.length) return null;
+function getBundledBinary(runtime, binary) {
+  const platform = process.platform;
+  const rudiHome = process.env.RUDI_HOME || path.join(process.env.HOME || process.env.USERPROFILE, '.rudi');
 
-  const envPath = path.join(installPath, '.env');
+  if (runtime === 'node') {
+    const npmPath = platform === 'win32'
+      ? path.join(rudiHome, 'runtimes', 'node', 'npm.cmd')
+      : path.join(rudiHome, 'runtimes', 'node', 'bin', 'npm');
 
-  // Check if .env already exists (don't overwrite user's secrets)
+    if (require('fs').existsSync(npmPath)) {
+      return npmPath;
+    }
+  }
+
+  if (runtime === 'python') {
+    const pipPath = platform === 'win32'
+      ? path.join(rudiHome, 'runtimes', 'python', 'Scripts', 'pip.exe')
+      : path.join(rudiHome, 'runtimes', 'python', 'bin', 'pip3');
+
+    if (require('fs').existsSync(pipPath)) {
+      return pipPath;
+    }
+  }
+
+  // Fall back to system command
+  return binary;
+}
+
+/**
+ * Install dependencies for a stack based on its runtime
+ * Uses bundled runtimes from ~/.rudi/runtimes/ when available
+ */
+async function installDependencies(stackPath, manifest) {
+  const runtime = manifest?.runtime || manifest?.mcp?.runtime || 'node';
+
   try {
-    await fs.access(envPath);
-    console.log(`  .env file already exists, preserving existing secrets`);
-    return envPath;
+    if (runtime === 'node') {
+      // Check if package.json exists
+      const packageJsonPath = path.join(stackPath, 'package.json');
+      try {
+        await fs.access(packageJsonPath);
+      } catch {
+        return { installed: false, reason: 'No package.json' };
+      }
+
+      // Check if node_modules already exists
+      const nodeModulesPath = path.join(stackPath, 'node_modules');
+      try {
+        await fs.access(nodeModulesPath);
+        return { installed: false, reason: 'Dependencies already installed' };
+      } catch {
+        // node_modules doesn't exist, install
+      }
+
+      // Use bundled npm if available
+      const npmCmd = getBundledBinary('node', 'npm');
+      console.log(`  Installing npm dependencies...`);
+      execSync(`"${npmCmd}" install --production`, {
+        cwd: stackPath,
+        stdio: 'pipe',
+      });
+      return { installed: true };
+
+    } else if (runtime === 'python') {
+      // Check for requirements.txt
+      const requirementsPath = path.join(stackPath, 'requirements.txt');
+      try {
+        await fs.access(requirementsPath);
+      } catch {
+        return { installed: false, reason: 'No requirements.txt' };
+      }
+
+      // Use bundled pip if available
+      const pipCmd = getBundledBinary('python', 'pip');
+      console.log(`  Installing pip dependencies...`);
+      execSync(`"${pipCmd}" install -r requirements.txt`, {
+        cwd: stackPath,
+        stdio: 'pipe',
+      });
+      return { installed: true };
+    }
+
+    return { installed: false, reason: `Unknown runtime: ${runtime}` };
+  } catch (error) {
+    return { installed: false, error: error.message };
+  }
+}
+
+function getManifestSecrets(manifest) {
+  return manifest?.requires?.secrets || manifest?.secrets || [];
+}
+
+function getSecretName(secret) {
+  if (typeof secret === 'string') return secret;
+  return secret.name || secret.key;
+}
+
+function getSecretDescription(secret) {
+  if (typeof secret !== 'object' || !secret) return null;
+  return secret.description || secret.label || null;
+}
+
+function getSecretLink(secret) {
+  if (typeof secret !== 'object' || !secret) return null;
+  return secret.link || secret.helpUrl || null;
+}
+
+function getSecretLabel(secret) {
+  if (typeof secret !== 'object' || !secret) return null;
+  return secret.label || secret.name || secret.key || null;
+}
+
+/**
+ * Check which secrets are available in RUDI's secrets store
+ * @returns {Promise<{ found: string[], missing: string[] }>}
+ */
+async function checkSecrets(manifest) {
+  const secrets = getManifestSecrets(manifest);
+
+  const found = [];
+  const missing = [];
+
+  for (const secret of secrets) {
+    const key = getSecretName(secret);
+    const isRequired = typeof secret === 'object' ? secret.required !== false : true;
+
+    const exists = await hasSecret(key);
+    if (exists) {
+      found.push(key);
+    } else if (isRequired) {
+      missing.push(key);
+    }
+  }
+
+  return { found, missing };
+}
+
+/**
+ * Parse .env.example as schema - extract required/optional keys
+ * This is used to show what secrets are needed
+ */
+async function parseEnvExample(installPath) {
+  const examplePath = path.join(installPath, '.env.example');
+  try {
+    const content = await fs.readFile(examplePath, 'utf-8');
+    const keys = [];
+
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+
+      const match = trimmed.match(/^([A-Z][A-Z0-9_]*)=/);
+      if (match) {
+        keys.push(match[1]);
+      }
+    }
+
+    return keys;
   } catch {
-    // File doesn't exist, create it
+    return [];
   }
-
-  const lines = [];
-  lines.push('# Environment variables for this stack');
-  lines.push('# Fill in your API keys below');
-  lines.push('');
-
-  for (const secret of manifest.secrets) {
-    const key = typeof secret === 'string' ? secret : secret.key;
-    const description = typeof secret === 'object' ? secret.description : null;
-    const helpUrl = typeof secret === 'object' ? secret.helpUrl : null;
-
-    if (description) {
-      lines.push(`# ${description}`);
-    }
-    if (helpUrl) {
-      lines.push(`# Get yours: ${helpUrl}`);
-    }
-    lines.push(`${key}=`);
-    lines.push('');
-  }
-
-  await fs.writeFile(envPath, lines.join('\n'), 'utf-8');
-  return envPath;
 }
 
 export async function cmdInstall(args, flags) {
   const pkgId = args[0];
 
   if (!pkgId) {
-    console.error('Usage: pstack install <package>');
-    console.error('       pstack install <package> --agent=claude        (register to Claude only)');
-    console.error('       pstack install <package> --agent=claude,codex  (register to specific agents)');
-    console.error('Example: pstack install pdf-creator');
+    console.error('Usage: rudi install <package>');
+    console.error('Example: rudi install slack');
+    console.error('');
+    console.error('After installing, run:');
+    console.error('  rudi secrets set <KEY>    # Configure required secrets');
+    console.error('  rudi integrate all        # Wire up your agents');
     process.exit(1);
   }
 
   const force = flags.force || false;
-
-  // Parse --agent flag (e.g., --agent=claude or --agent=claude,codex)
-  let targetAgents = null;
-  if (flags.agent) {
-    const validAgents = ['claude', 'codex', 'gemini'];
-    targetAgents = flags.agent.split(',').map(a => a.trim()).filter(a => validAgents.includes(a));
-
-    if (targetAgents.length === 0) {
-      console.error(`Invalid --agent value. Valid agents: ${validAgents.join(', ')}`);
-      process.exit(1);
-    }
-  }
 
   console.log(`Resolving ${pkgId}...`);
 
@@ -112,13 +236,45 @@ export async function cmdInstall(args, flags) {
       }
     }
 
-    // Show required secrets
+    // Check ALL dependencies: runtimes, binaries, and secrets
+    console.log(`\nDependency check:`);
+
+    // 1. Check system dependencies (runtimes, binaries)
+    const depCheck = checkAllDependencies(resolved);
+    if (depCheck.results.length > 0) {
+      for (const line of formatDependencyResults(depCheck.results)) {
+        console.log(line);
+      }
+    }
+
+    // 2. Check secrets from RUDI's secrets store
+    const secretsCheck = { found: [], missing: [] };
     if (resolved.requires?.secrets?.length > 0) {
-      console.log(`\nRequired secrets:`);
       for (const secret of resolved.requires.secrets) {
         const name = typeof secret === 'string' ? secret : secret.name;
-        console.log(`  - ${name}`);
+        const isRequired = typeof secret === 'object' ? secret.required !== false : true;
+
+        const exists = await hasSecret(name);
+        if (exists) {
+          secretsCheck.found.push(name);
+          console.log(`  ✓ ${name} (from secrets store)`);
+        } else if (isRequired) {
+          secretsCheck.missing.push(name);
+          console.log(`  ○ ${name} - not configured`);
+        } else {
+          console.log(`  ○ ${name} (optional)`);
+        }
       }
+    }
+
+    // Block on missing system deps (not secrets - those can be added after)
+    if (!depCheck.satisfied && !force) {
+      console.error(`\n✗ Missing required dependencies. Install them first:`);
+      for (const r of depCheck.results.filter(r => !r.available)) {
+        console.error(`    rudi install ${r.type}:${r.name}`);
+      }
+      console.error(`\nOr use --force to install anyway.`);
+      process.exit(1);
     }
 
     console.log(`\nInstalling...`);
@@ -143,35 +299,84 @@ export async function cmdInstall(args, flags) {
         }
       }
 
-      // For stacks: create .env and register MCP
+      // For stacks: install dependencies, check secrets, show next steps
       if (resolved.kind === 'stack') {
         const manifest = await loadManifest(result.path);
         if (manifest) {
-          const stackId = resolved.id.replace(/^stack:/, '');
-
-          // Create .env file with placeholders
-          const envPath = await createEnvFile(result.path, manifest);
-
-          // Register MCP in agent configs (only installed agents, or specific agents if --agent flag)
-          await registerMcpAll(stackId, result.path, manifest, targetAgents);
-
-          // Show next steps if secrets are required
-          if (manifest.secrets?.length > 0) {
-            console.log(`\n⚠️  This stack requires configuration:`);
-            console.log(`  Edit: ${envPath}`);
-            console.log(`\n  Required secrets:`);
-            for (const secret of manifest.secrets) {
-              const key = typeof secret === 'string' ? secret : secret.key;
-              const label = typeof secret === 'object' ? secret.label : key;
-              console.log(`    - ${label} (${key})`);
-            }
-            console.log(`\n  After adding secrets, run: pstack run ${pkgId}`);
-            return;
+          // Install runtime dependencies (npm install, pip install, etc.)
+          const depResult = await installDependencies(result.path, manifest);
+          if (depResult.installed) {
+            console.log(`  ✓ Dependencies installed`);
+          } else if (depResult.error) {
+            console.log(`  ⚠ Failed to install dependencies: ${depResult.error}`);
           }
+
+          // Check secrets status
+          const { found, missing } = await checkSecrets(manifest);
+
+          // Also check .env.example for any keys not in manifest
+          const envExampleKeys = await parseEnvExample(result.path);
+          for (const key of envExampleKeys) {
+            if (!found.includes(key) && !missing.includes(key)) {
+              const exists = await hasSecret(key);
+              if (!exists) {
+                missing.push(key);
+              } else {
+                found.push(key);
+              }
+            }
+          }
+
+          // Add placeholder entries to secrets.json for missing secrets
+          // This makes it visible what needs to be configured
+          if (missing.length > 0) {
+            for (const key of missing) {
+              const existing = await getSecret(key);
+              if (existing === null) {
+                // Add empty placeholder - hasSecret() will return false for empty strings
+                await setSecret(key, '');
+              }
+            }
+          }
+
+          // Show next steps
+          console.log(`\nNext steps:`);
+
+          // 1. Secrets
+          if (missing.length > 0) {
+            console.log(`\n  1. Configure secrets (${missing.length} pending):`);
+            for (const key of missing) {
+              const secret = getManifestSecrets(manifest).find(s =>
+                (typeof s === 'string' ? s : s.name) === key
+              );
+              const helpUrl = getSecretLink(secret);
+              console.log(`     rudi secrets set ${key} "<your-value>"`);
+              if (helpUrl) {
+                console.log(`     # Get yours: ${helpUrl}`);
+              }
+            }
+            console.log(`\n     Check status: rudi secrets list`);
+          } else if (found.length > 0) {
+            console.log(`\n  1. Secrets: ✓ ${found.length} configured`);
+          } else {
+            console.log(`\n  1. Secrets: ✓ None required`);
+          }
+
+          // 2. Integrate
+          const agents = getInstalledAgents();
+          if (agents.length > 0) {
+            console.log(`\n  2. Wire up your agents:`);
+            console.log(`     rudi integrate all`);
+            console.log(`     # Detected: ${agents.map(a => a.name).join(', ')}`);
+          }
+
+          // 3. Done
+          console.log(`\n  3. Restart your agent to use the stack`);
+          return;
         }
       }
 
-      console.log(`\nRun with: pstack run ${pkgId}`);
+      console.log(`\n✓ Installed successfully.`);
     } else {
       console.error(`\n✗ Installation failed: ${result.error}`);
       process.exit(1);

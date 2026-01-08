@@ -1,92 +1,114 @@
-# pstack
+# RUDI CLI
 
-Package manager for MCP stacks. Install tools that work with Claude, Codex, and Gemini.
+Install and manage MCP stacks, runtimes, and AI agents.
 
 ## Install
 
 ```bash
-npm i -g @prompt-stack/cli
+npm i -g @learnrudi/cli
 ```
+
+Requires Node.js + npm. The npm postinstall step bootstraps `~/.rudi` and
+downloads the default runtimes.
+
+## Installation Flow (CLI + Studio)
+
+### CLI (npm)
+
+1. `npm i -g @learnrudi/cli` downloads the CLI package.
+2. Postinstall creates `~/.rudi/` folders, downloads Node/Python runtimes,
+   creates `~/.rudi/shims/rudi-mcp`, and initializes `~/.rudi/secrets.json`.
+3. Run `rudi init` to create `~/.rudi/rudi.db`, write `settings.json`, and
+   ensure essential binaries and shims are present.
+
+### Studio (desktop app)
+
+1. Studio bundles the CLI and installs it to `~/.rudi/bins/rudi`.
+2. On first launch, Studio runs `rudi init` unless `~/.rudi` is already
+   initialized.
+3. CLI and Studio share the same `~/.rudi` home, so stacks, runtimes, secrets,
+   and the database stay in sync.
+
+If you already use Studio, you can skip the npm install unless you want the
+`rudi` command in your shell. If you already use the CLI, Studio will reuse the
+existing `~/.rudi` setup.
 
 ## Quick Start
 
 ```bash
-# See what's available
-pstack search --all
+# Search available stacks
+rudi search --all
 
 # Install a stack
-pstack install stack:slack
+rudi install slack
 
-# Add your API key
-nano ~/.prompt-stack/stacks/slack/.env
+# Configure secrets
+rudi secrets set SLACK_BOT_TOKEN "xoxb-your-token"
 
-# Done - Claude/Codex/Gemini can now use Slack tools
+# Wire up your agents (Claude, Gemini, VS Code, etc.)
+rudi integrate all
+
+# Restart your agent to use the new stack
 ```
 
 ## Commands
 
 ```bash
-pstack search <query>      # Search for packages
-pstack search --all        # List all packages
-pstack install <pkg>       # Install a package
-pstack remove <pkg>        # Remove a package
-pstack list [kind]         # List installed (stacks, runtimes, tools, agents)
-pstack update [pkg]        # Update packages
-pstack doctor              # Check system health
+rudi search <query>       # Search for packages
+rudi search --all         # List all packages
+rudi install <pkg>        # Install a package
+rudi remove <pkg>         # Remove a package
+rudi list [kind]          # List installed (stacks, runtimes, binaries, agents)
+rudi secrets list         # Show configured secrets
+rudi secrets set <key>    # Set a secret
+rudi integrate <agent>    # Wire stack to agent config
+rudi update [pkg]         # Update packages
+rudi doctor               # Check system health
+```
+
+## How It Works
+
+1. `rudi install slack` downloads the MCP server tarball from GitHub releases
+2. Extracts to `~/.rudi/stacks/slack/`
+3. Runs `npm install` to install dependencies
+4. Shows which secrets need to be configured
+
+When an agent runs the stack:
+1. Agent config points to `~/.rudi/shims/rudi-mcp`
+2. Shim calls `rudi mcp slack`
+3. RUDI loads secrets from `~/.rudi/secrets.json`
+4. Injects secrets as environment variables
+5. Runs the MCP server with bundled runtime
+
+## Directory Structure
+
+```
+~/.rudi/
+├── stacks/           # Installed MCP stacks
+├── runtimes/         # Bundled Node.js, Python
+├── tools/            # Binaries (ffmpeg, ripgrep, etc.)
+├── shims/            # Shim scripts for agent configs
+├── secrets.json      # Encrypted secrets (0600 permissions)
+└── rudi.db           # Local database
 ```
 
 ## Available Stacks
 
-| Stack | Description | Auth |
-|-------|-------------|------|
-| `stack:postgres` | Query PostgreSQL databases | DATABASE_URL |
-| `stack:slack` | Send messages, search channels | SLACK_BOT_TOKEN |
-| `stack:notion-workspace` | Pages, databases, search | NOTION_API_KEY |
-| `stack:google-workspace` | Gmail, Sheets, Docs, Drive, Calendar | OAuth |
-| `stack:google-ai` | Gemini, Imagen, Veo | GOOGLE_AI_API_KEY |
-| `stack:openai` | DALL-E, Whisper, TTS, Sora | OPENAI_API_KEY |
-| `stack:zoho-mail` | Email via Zoho | OAuth |
-| `stack:content-extractor` | YouTube, Reddit, TikTok transcripts | - |
-| `stack:video-editor` | Trim, speed, compress videos | - |
-| `stack:ms-office` | Read Word/Excel files | - |
-| `stack:whisper` | Local audio transcription | - |
+| Stack | Description |
+|-------|-------------|
+| slack | Send messages, search channels, manage reactions |
+| google-workspace | Gmail, Sheets, Docs, Drive, Calendar |
+| notion-workspace | Pages, databases, search |
+| google-ai | Gemini, Imagen, Veo |
+| openai | DALL-E, Whisper, TTS, Sora |
+| postgres | PostgreSQL database queries |
+| video-editor | ffmpeg-based video editing |
+| content-extractor | YouTube, Reddit, TikTok, articles |
+| github | Issues, PRs, repos, actions |
+| stripe | Payments, subscriptions, invoices |
 
-## Secrets
+## Links
 
-Each stack has its own `.env` file:
-
-```
-~/.prompt-stack/stacks/<stack>/.env
-```
-
-When you install a stack, a `.env` is created with placeholders. Add your keys:
-
-```bash
-# ~/.prompt-stack/stacks/postgres/.env
-DATABASE_URL=postgresql://user:pass@host:5432/db
-```
-
-Secrets are automatically injected into Claude, Codex, and Gemini configs.
-
-## How It Works
-
-1. `pstack install stack:slack` downloads the MCP server
-2. Creates `.env` with required secrets as placeholders
-3. Registers the MCP server in `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`
-4. You fill in the API key in `.env`
-5. Claude/Codex/Gemini can now use the tools
-
-## Data Location
-
-```
-~/.prompt-stack/
-├── stacks/           # MCP servers (each with .env)
-├── runtimes/         # Node, Python, Deno
-├── tools/            # ffmpeg, ripgrep, etc.
-├── agents/           # Claude, Codex, Gemini CLIs
-└── prompt-stack.db   # Local database
-```
-
-## License
-
-MIT
+- Website: https://learnrudi.com
+- Registry: https://github.com/learn-rudi/registry
+- Issues: https://github.com/learn-rudi/cli/issues

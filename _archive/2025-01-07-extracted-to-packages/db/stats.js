@@ -1,5 +1,5 @@
 /**
- * Stats module for pstack CLI
+ * Stats module for RUDI CLI
  * Provides aggregation queries for usage analytics
  */
 

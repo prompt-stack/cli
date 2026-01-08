@@ -2,7 +2,16 @@
  * Search command - search registry for packages
  */
 
-import { searchPackages, listPackages } from '@prompt-stack/core';
+import { searchPackages, listPackages } from '@learnrudi/core';
+
+function pluralizeKind(kind) {
+  if (!kind) return 'packages';
+  return kind === 'binary' ? 'binaries' : `${kind}s`;
+}
+
+function headingForKind(kind) {
+  return kind === 'binary' ? 'BINARIES' : `${kind.toUpperCase()}S`;
+}
 
 export async function cmdSearch(args, flags) {
   const query = args[0];
@@ -13,17 +22,28 @@ export async function cmdSearch(args, flags) {
   }
 
   if (!query) {
-    console.error('Usage: pstack search <query>');
-    console.error('       pstack search --all            List all available packages');
-    console.error('       pstack search --all --stacks   List all stacks');
-    console.error('       pstack search --all --runtimes List all runtimes');
-    console.error('       pstack search --all --tools    List all tools');
-    console.error('       pstack search --all --agents   List all agents');
-    console.error('Example: pstack search pdf');
+    console.error('Usage: rudi search <query>');
+    console.error('       rudi search --all            List all available packages');
+    console.error('       rudi search --all -s   List all stacks');
+    console.error('       rudi search --all --runtimes List all runtimes');
+    console.error('       rudi search --all --binaries List all binaries');
+    console.error('       rudi search --all --agents   List all agents');
+    console.error('Example: rudi search pdf');
     process.exit(1);
   }
 
-  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : flags.tools ? 'tool' : flags.agents ? 'agent' : null;
+  const binariesFlag = flags.binaries || flags.tools;
+  const kind = flags.stacks
+    ? 'stack'
+    : flags.prompts
+      ? 'prompt'
+      : flags.runtimes
+        ? 'runtime'
+        : binariesFlag
+          ? 'binary'
+          : flags.agents
+            ? 'agent'
+            : null;
 
   console.log(`Searching for "${query}"...`);
 
@@ -47,7 +67,7 @@ export async function cmdSearch(args, flags) {
       stack: results.filter(r => r.kind === 'stack'),
       prompt: results.filter(r => r.kind === 'prompt'),
       runtime: results.filter(r => r.kind === 'runtime'),
-      tool: results.filter(r => r.kind === 'tool'),
+      binary: results.filter(r => r.kind === 'binary'),
       agent: results.filter(r => r.kind === 'agent')
     };
 
@@ -66,7 +86,7 @@ export async function cmdSearch(args, flags) {
       }
     }
 
-    console.log(`Install with: pstack install <package-id>`);
+    console.log(`Install with: rudi install <package-id>`);
 
   } catch (error) {
     console.error(`Search failed: ${error.message}`);
@@ -78,10 +98,21 @@ export async function cmdSearch(args, flags) {
  * List all available packages from registry
  */
 async function listAllPackages(flags) {
-  const kind = flags.stacks ? 'stack' : flags.prompts ? 'prompt' : flags.runtimes ? 'runtime' : flags.tools ? 'tool' : flags.agents ? 'agent' : null;
+  const binariesFlag = flags.binaries || flags.tools;
+  const kind = flags.stacks
+    ? 'stack'
+    : flags.prompts
+      ? 'prompt'
+      : flags.runtimes
+        ? 'runtime'
+        : binariesFlag
+          ? 'binary'
+          : flags.agents
+            ? 'agent'
+            : null;
 
   try {
-    const kinds = kind ? [kind] : ['stack', 'prompt', 'runtime', 'tool', 'agent'];
+    const kinds = kind ? [kind] : ['stack', 'prompt', 'runtime', 'binary', 'agent'];
     const allPackages = {};
     let totalCount = 0;
 
@@ -97,13 +128,13 @@ async function listAllPackages(flags) {
       return;
     }
 
-    console.log(kind ? `Listing all ${kind}s...` : 'Listing all available packages...');
+    console.log(kind ? `Listing all ${pluralizeKind(kind)}...` : 'Listing all available packages...');
 
     for (const k of kinds) {
       const packages = allPackages[k];
       if (packages.length === 0) continue;
 
-      console.log(`\n${k.toUpperCase()}S (${packages.length}):`);
+      console.log(`\n${headingForKind(k)} (${packages.length}):`);
       console.log('─'.repeat(50));
 
       for (const pkg of packages) {
@@ -115,7 +146,7 @@ async function listAllPackages(flags) {
     }
 
     console.log(`\nTotal: ${totalCount} package(s) available`);
-    console.log(`Install with: pstack install <package-id>`);
+    console.log(`Install with: rudi install <package-id>`);
 
   } catch (error) {
     console.error(`Failed to list packages: ${error.message}`);

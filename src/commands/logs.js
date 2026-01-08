@@ -1,10 +1,10 @@
 /**
- * pstack logs - Observability logs command
+ * rudi logs - Observability logs command
  *
  * Query and export agent visibility logs for debugging and support
  */
 
-import { queryLogs, getLogStats, getBeforeCrashLogs, getLogCount } from '../../db/logs.js';
+import { queryLogs, getLogStats, getBeforeCrashLogs, getLogCount } from '@learnrudi/db/logs';
 import fs from 'fs';
 import path from 'path';
 

@@ -1,7 +1,7 @@
 /**
  * Tests for database schema and pricing calculations
  *
- * Run with: pnpm vitest run pstack-cli/db/schema.test.js
+ * Run with: pnpm vitest run rudi-cli/db/schema.test.js
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -13,7 +13,7 @@ import os from 'os';
 const require = createRequire(import.meta.url);
 
 // Use a test database instead of production
-const TEST_DB_PATH = path.join(os.tmpdir(), `pstack-test-schema-${Date.now()}.db`);
+const TEST_DB_PATH = path.join(os.tmpdir(), `rudi-test-schema-${Date.now()}.db`);
 
 // Setup test database before importing schema
 let db;

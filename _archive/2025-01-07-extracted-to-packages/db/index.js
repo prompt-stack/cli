@@ -1,5 +1,5 @@
 /**
- * Database connection module for pstack CLI
+ * Database connection module for RUDI CLI
  * Uses better-sqlite3 for synchronous, fast SQLite access
  */
 
@@ -8,8 +8,8 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-const PROMPT_STACK_HOME = path.join(os.homedir(), '.prompt-stack');
-const DB_PATH = path.join(PROMPT_STACK_HOME, 'prompt-stack.db');
+const RUDI_HOME = path.join(os.homedir(), '.rudi');
+const DB_PATH = path.join(RUDI_HOME, 'rudi.db');
 
 let db = null;
 
@@ -22,8 +22,8 @@ let db = null;
 function getDb(options = {}) {
   if (!db) {
     // Ensure directory exists
-    if (!fs.existsSync(PROMPT_STACK_HOME)) {
-      fs.mkdirSync(PROMPT_STACK_HOME, { recursive: true });
+    if (!fs.existsSync(RUDI_HOME)) {
+      fs.mkdirSync(RUDI_HOME, { recursive: true });
     }
 
     db = new Database(DB_PATH, {
@@ -103,5 +103,5 @@ export {
   getDbPath,
   getDbSize,
   DB_PATH,
-  PROMPT_STACK_HOME
+  RUDI_HOME
 };

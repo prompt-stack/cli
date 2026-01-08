@@ -1,31 +1,35 @@
 {
-  "name": "@prompt-stack/cli",
-  "version": "2.0.1",
-  "description": "Prompt Stack CLI - Install and manage MCP stacks, runtimes, and tools",
+  "name": "@learnrudi/cli",
+  "version": "1.8.0",
+  "description": "RUDI CLI - Install and manage MCP stacks, runtimes, and AI agents",
   "type": "module",
   "main": "dist/index.cjs",
   "bin": {
-    "pstack": "dist/index.cjs"
+    "rudi": "dist/index.cjs"
   },
   "files": [
     "dist",
+    "scripts",
     "README.md"
   ],
   "scripts": {
     "start": "node src/index.js",
-    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:better-sqlite3",
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.cjs --external:better-sqlite3 --external:@learnrudi/core --external:@learnrudi/db --external:@learnrudi/env --external:@learnrudi/manifest --external:@learnrudi/mcp --external:@learnrudi/registry-client --external:@learnrudi/runner --external:@learnrudi/secrets --external:@learnrudi/utils",
+    "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "npm run build",
     "test": "node --test src/__tests__/"
   },
-  "dependencies": {
-    "better-sqlite3": "^12.5.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@prompt-stack/core": "workspace:*",
-    "@prompt-stack/env": "workspace:*",
-    "@prompt-stack/manifest": "workspace:*",
-    "@prompt-stack/registry-client": "workspace:*",
-    "@prompt-stack/runner": "workspace:*",
+    "@learnrudi/core": "workspace:*",
+    "@learnrudi/db": "workspace:*",
+    "@learnrudi/env": "workspace:*",
+    "@learnrudi/manifest": "workspace:*",
+    "@learnrudi/mcp": "workspace:*",
+    "@learnrudi/registry-client": "workspace:*",
+    "@learnrudi/runner": "workspace:*",
+    "@learnrudi/secrets": "workspace:*",
+    "@learnrudi/utils": "workspace:*",
     "esbuild": "^0.27.2"
   },
   "engines": {
@@ -38,14 +42,14 @@
     "claude",
     "codex",
     "gemini",
-    "prompt-stack",
+    "rudi",
     "cli"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/prompt-stack/cli.git"
+    "url": "https://github.com/learn-rudi/cli.git"
   },
-  "homepage": "https://prompt-stack.dev",
+  "homepage": "https://learnrudi.com",
   "publishConfig": {
     "access": "public"
   },

@@ -2,14 +2,19 @@
  * Remove command - uninstall packages
  *
  * Usage:
- *   pstack remove <package>         Remove a specific package
- *   pstack remove --all             Remove all packages
- *   pstack remove stacks --all      Remove all stacks
- *   pstack remove tools --all       Remove all tools
+ *   rudi remove <package>         Remove a specific package
+ *   rudi remove --all             Remove all packages
+ *   rudi remove stacks --all      Remove all stacks
+ *   rudi remove binaries --all    Remove all binaries
  */
 
-import { uninstallPackage, isPackageInstalled, listInstalled } from '@prompt-stack/core';
-import { unregisterMcpAll } from '../utils/mcp-registry.js';
+import { uninstallPackage, isPackageInstalled, listInstalled } from '@learnrudi/core';
+import { unregisterMcpAll } from '@learnrudi/mcp';
+
+function pluralizeKind(kind) {
+  if (!kind) return 'packages';
+  return kind === 'binary' ? 'binaries' : `${kind}s`;
+}
 
 export async function cmdRemove(args, flags) {
   // Handle bulk removal (--all flag)
@@ -21,12 +26,12 @@ export async function cmdRemove(args, flags) {
   const pkgId = args[0];
 
   if (!pkgId) {
-    console.error('Usage: pstack remove <package>');
-    console.error('       pstack remove --all                           (remove all packages)');
-    console.error('       pstack remove stacks --all                    (remove all stacks)');
-    console.error('       pstack remove <package> --agent=claude        (unregister from Claude only)');
-    console.error('       pstack remove <package> --agent=claude,codex  (unregister from specific agents)');
-    console.error('Example: pstack remove pdf-creator');
+    console.error('Usage: rudi remove <package>');
+    console.error('       rudi remove --all                           (remove all packages)');
+    console.error('       rudi remove stacks --all                    (remove all stacks)');
+    console.error('       rudi remove <package> --agent=claude        (unregister from Claude only)');
+    console.error('       rudi remove <package> --agent=claude,codex  (unregister from specific agents)');
+    console.error('Example: rudi remove pdf-creator');
     process.exit(1);
   }
 
@@ -101,12 +106,13 @@ async function removeBulk(kind, flags) {
     if (kind === 'stacks') kind = 'stack';
     if (kind === 'prompts') kind = 'prompt';
     if (kind === 'runtimes') kind = 'runtime';
-    if (kind === 'tools') kind = 'tool';
+    if (kind === 'binaries') kind = 'binary';
+    if (kind === 'tools') kind = 'binary';
     if (kind === 'agents') kind = 'agent';
 
-    if (!['stack', 'prompt', 'runtime', 'tool', 'agent'].includes(kind)) {
+    if (!['stack', 'prompt', 'runtime', 'binary', 'agent'].includes(kind)) {
       console.error(`Invalid kind: ${kind}`);
-      console.error(`Valid kinds: stack, prompt, runtime, tool, agent`);
+      console.error(`Valid kinds: stack, prompt, runtime, binary, agent`);
       process.exit(1);
     }
   }
@@ -116,12 +122,12 @@ async function removeBulk(kind, flags) {
     const packages = await listInstalled(kind);
 
     if (packages.length === 0) {
-      console.log(kind ? `No ${kind}s installed.` : 'No packages installed.');
+      console.log(kind ? `No ${pluralizeKind(kind)} installed.` : 'No packages installed.');
       return;
     }
 
     // Show what will be removed
-    console.log(kind ? `\nFound ${packages.length} ${kind}(s) to remove:` : `\nFound ${packages.length} package(s) to remove:`);
+    console.log(kind ? `\nFound ${packages.length} ${pluralizeKind(kind)} to remove:` : `\nFound ${packages.length} package(s) to remove:`);
     for (const pkg of packages) {
       console.log(`  - ${pkg.id}`);
     }

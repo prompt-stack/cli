@@ -2,23 +2,23 @@
  * Which command - show detailed information about an installed stack
  *
  * Usage:
- *   pstack which <stack-id>
- *   pstack which google-workspace
- *   pstack which stack:google-workspace
+ *   rudi which <stack-id>
+ *   rudi which google-workspace
+ *   rudi which stack:google-workspace
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { listInstalled } from '@prompt-stack/core';
-import { PATHS } from '@prompt-stack/env';
+import { listInstalled } from '@learnrudi/core';
+import { PATHS } from '@learnrudi/env';
 
 export async function cmdWhich(args, flags) {
   const stackId = args[0];
 
   if (!stackId) {
-    console.error('Usage: pstack which <stack-id>');
-    console.error('Example: pstack which google-workspace');
+    console.error('Usage: rudi which <stack-id>');
+    console.error('Example: rudi which google-workspace');
     process.exit(1);
   }
 
@@ -98,8 +98,8 @@ export async function cmdWhich(args, flags) {
 
     // Usage tips
     console.log('Commands:');
-    console.log(`  pstack run ${stack.id}          Test the stack`);
-    console.log(`  pstack secrets ${stack.id}      Configure secrets`);
+    console.log(`  rudi run ${stack.id}          Test the stack`);
+    console.log(`  rudi secrets ${stack.id}      Configure secrets`);
     if (runtimeInfo.entry) {
       console.log('');
       console.log('Run MCP server directly:');

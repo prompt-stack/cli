@@ -1,26 +1,28 @@
 #!/usr/bin/env node
 /**
- * PSTACK CLI v2.0.0 - Prompt Stack Command Line Interface
+ * RUDI CLI v2.0.0 - RUDI Command Line Interface
  *
  * Commands:
- *   pstack                     Dashboard / interactive mode
- *   pstack search <query>      Search registry for stacks/prompts
- *   pstack install <pkg>       Install a package
- *   pstack auth <stack>        Authenticate OAuth stack
- *   pstack run <stack>         Run a stack
- *   pstack list [kind]         List installed packages
- *   pstack which <stack>       Show detailed stack info
- *   pstack remove <pkg>        Remove a package
- *   pstack update [pkg]        Update packages
- *   pstack secrets <cmd>       Manage secrets
- *   pstack runtimes <cmd>      Manage runtimes
- *   pstack db <cmd>            Database operations
- *   pstack logs [options]      Query observability logs
- *   pstack doctor              Health check
+ *   rudi home                Show ~/.rudi structure and status
+ *   rudi search <query>      Search registry for stacks/prompts
+ *   rudi install <pkg>       Install a package
+ *   rudi run <stack>         Run a stack
+ *
+ *   rudi stacks              List installed stacks
+ *   rudi runtimes            List installed runtimes
+ *   rudi binaries            List installed binaries
+ *   rudi agents              List installed agents
+ *   rudi prompts             List installed prompts
+ *   rudi list [kind]         List all installed packages
+ *
+ *   rudi db <cmd>            Database operations
+ *   rudi import <cmd>        Import sessions from AI providers
+ *   rudi secrets <cmd>       Manage secrets
+ *   rudi doctor              Health check
  */
 
-import { parseArgs } from './utils/args.js';
-import { printHelp, printVersion } from './utils/help.js';
+import { parseArgs } from '@learnrudi/utils/args';
+import { printHelp, printVersion } from '@learnrudi/utils/help';
 
 // Commands
 import { cmdSearch } from './commands/search.js';
@@ -30,11 +32,17 @@ import { cmdList } from './commands/list.js';
 import { cmdRemove } from './commands/remove.js';
 import { cmdSecrets } from './commands/secrets.js';
 import { cmdDb } from './commands/db.js';
+import { cmdImport } from './commands/import.js';
 import { cmdDoctor } from './commands/doctor.js';
+import { cmdHome } from './commands/home.js';
+import { cmdInit } from './commands/init.js';
 import { cmdUpdate } from './commands/update.js';
 import { cmdLogs } from './commands/logs.js';
 import { cmdWhich } from './commands/which.js';
 import { cmdAuth } from './commands/auth.js';
+import { cmdMcp } from './commands/mcp.js';
+import { cmdIntegrate } from './commands/integrate.js';
+import { cmdMigrate } from './commands/migrate.js';
 
 const VERSION = '2.0.0';
 
@@ -90,9 +98,19 @@ async function main() {
         await cmdDb(args, flags);
         break;
 
+      case 'import':
+        await cmdImport(args, flags);
+        break;
+
       case 'doctor':
       case 'check':
         await cmdDoctor(args, flags);
+        break;
+
+      case 'init':
+      case 'bootstrap':
+      case 'setup':
+        await cmdInit(args, flags);
         break;
 
       case 'update':
@@ -116,6 +134,46 @@ async function main() {
         await cmdAuth(args, flags);
         break;
 
+      case 'mcp':
+        await cmdMcp(args, flags);
+        break;
+
+      case 'integrate':
+        await cmdIntegrate(args, flags);
+        break;
+
+      case 'migrate':
+        await cmdMigrate(args, flags);
+        break;
+
+      case 'home':
+      case 'status':
+        await cmdHome(args, flags);
+        break;
+
+      // Shortcuts for listing specific package types
+      case 'stacks':
+        await cmdList(['stacks'], flags);
+        break;
+
+      case 'prompts':
+        await cmdList(['prompts'], flags);
+        break;
+
+      case 'runtimes':
+        await cmdList(['runtimes'], flags);
+        break;
+
+      case 'binaries':
+      case 'bins':
+      case 'tools':
+        await cmdList(['binaries'], flags);
+        break;
+
+      case 'agents':
+        await cmdList(['agents'], flags);
+        break;
+
       case 'help':
         printHelp(args[0]);
         break;
@@ -130,7 +188,7 @@ async function main() {
           printHelp();
         } else {
           console.error(`Unknown command: ${command}`);
-          console.error(`Run 'pstack help' for usage`);
+          console.error(`Run 'rudi help' for usage`);
           process.exit(1);
         }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Test script for pstack logs command
+ * Test script for rudi logs command
  */
 
 import { cmdLogs } from './src/commands/logs.js';

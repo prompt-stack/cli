@@ -2,6 +2,8 @@
  * Database command - database operations
  */
 
+import { existsSync, copyFileSync, unlinkSync } from 'fs';
+import { dirname, join } from 'path';
 import {
   getDb,
   initSchema,
@@ -10,8 +12,8 @@ import {
   getDbSize,
   getStats,
   search
-} from '@prompt-stack/runner/db';
-import { formatBytes, formatDuration } from '../utils/args.js';
+} from '@learnrudi/db';
+import { formatBytes, formatDuration } from '@learnrudi/utils/args';
 
 export async function cmdDb(args, flags) {
   const subcommand = args[0];
@@ -33,20 +35,53 @@ export async function cmdDb(args, flags) {
       console.log(getDbPath());
       break;
 
+    case 'reset':
+      await dbReset(flags);
+      break;
+
+    case 'vacuum':
+      dbVacuum(flags);
+      break;
+
+    case 'backup':
+      dbBackup(args.slice(1), flags);
+      break;
+
+    case 'prune':
+      dbPrune(args.slice(1), flags);
+      break;
+
+    case 'tables':
+      dbTables(flags);
+      break;
+
     default:
       console.log(`
-pstack db - Database operations
+rudi db - Database operations
 
 COMMANDS
   stats              Show usage statistics
   search <query>     Search conversation history
   init               Initialize or migrate database
   path               Show database file path
+  reset              Delete all data (requires --force)
+  vacuum             Compact database and reclaim space
+  backup [file]      Create database backup
+  prune [days]       Delete sessions older than N days (default: 90)
+  tables             Show table row counts
+
+OPTIONS
+  --force            Required for destructive operations
+  --dry-run          Preview without making changes
 
 EXAMPLES
-  pstack db stats
-  pstack db search "authentication bug"
-  pstack db init
+  rudi db stats
+  rudi db search "authentication bug"
+  rudi db init
+  rudi db reset --force
+  rudi db vacuum
+  rudi db backup ~/backups/rudi-backup.db
+  rudi db prune 30 --dry-run
 `);
   }
 }
@@ -54,7 +89,7 @@ EXAMPLES
 function dbStats(flags) {
   if (!isDatabaseInitialized()) {
     console.log('Database not initialized.');
-    console.log('Run: pstack db init');
+    console.log('Run: rudi db init');
     return;
   }
 
@@ -121,7 +156,7 @@ function dbSearch(args, flags) {
   const query = args.join(' ');
 
   if (!query) {
-    console.error('Usage: pstack db search <query>');
+    console.error('Usage: rudi db search <query>');
     process.exit(1);
   }
 
@@ -204,4 +239,256 @@ function truncate(str, len) {
 
 function stripHighlight(str) {
   return str.replace(/>>>/g, '').replace(/<<</g, '');
+}
+
+async function dbReset(flags) {
+  if (!isDatabaseInitialized()) {
+    console.log('Database not initialized.');
+    return;
+  }
+
+  if (!flags.force) {
+    console.error('This will delete ALL data from the database.');
+    console.error('Use --force to confirm.');
+    process.exit(1);
+  }
+
+  const db = getDb();
+  const dbPath = getDbPath();
+
+  // Get counts before deletion
+  const tables = ['sessions', 'turns', 'tool_calls', 'projects'];
+  const counts = {};
+
+  for (const table of tables) {
+    try {
+      const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
+      counts[table] = row.count;
+    } catch (e) {
+      counts[table] = 0;
+    }
+  }
+
+  console.log('Deleting all data...');
+  console.log('─'.repeat(40));
+
+  // Delete in order (respecting foreign keys)
+  const deleteOrder = ['tool_calls', 'turns', 'sessions', 'projects'];
+
+  for (const table of deleteOrder) {
+    try {
+      db.prepare(`DELETE FROM ${table}`).run();
+      console.log(`  ${table}: ${counts[table]} rows deleted`);
+    } catch (e) {
+      // Table might not exist
+    }
+  }
+
+  // Also clear FTS tables
+  try {
+    db.prepare('DELETE FROM turns_fts').run();
+    console.log('  turns_fts: cleared');
+  } catch (e) {
+    // FTS might not exist
+  }
+
+  console.log('─'.repeat(40));
+  console.log('Database reset complete.');
+  console.log(`Path: ${dbPath}`);
+}
+
+function dbVacuum(flags) {
+  if (!isDatabaseInitialized()) {
+    console.log('Database not initialized.');
+    return;
+  }
+
+  const dbPath = getDbPath();
+  const sizeBefore = getDbSize();
+
+  console.log('Compacting database...');
+  console.log(`  Before: ${formatBytes(sizeBefore)}`);
+
+  const db = getDb();
+  db.exec('VACUUM');
+
+  const sizeAfter = getDbSize();
+  const saved = sizeBefore - sizeAfter;
+
+  console.log(`  After:  ${formatBytes(sizeAfter)}`);
+
+  if (saved > 0) {
+    console.log(`  Saved:  ${formatBytes(saved)} (${((saved / sizeBefore) * 100).toFixed(1)}%)`);
+  } else {
+    console.log('  No space reclaimed.');
+  }
+}
+
+function dbBackup(args, flags) {
+  if (!isDatabaseInitialized()) {
+    console.log('Database not initialized.');
+    return;
+  }
+
+  const dbPath = getDbPath();
+
+  // Default backup path
+  let backupPath = args[0];
+  if (!backupPath) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    backupPath = join(dirname(dbPath), `rudi-backup-${timestamp}.db`);
+  }
+
+  // Expand ~ to home directory
+  if (backupPath.startsWith('~')) {
+    backupPath = join(process.env.HOME || '', backupPath.slice(1));
+  }
+
+  if (existsSync(backupPath) && !flags.force) {
+    console.error(`Backup file already exists: ${backupPath}`);
+    console.error('Use --force to overwrite.');
+    process.exit(1);
+  }
+
+  console.log('Creating backup...');
+  console.log(`  Source: ${dbPath}`);
+  console.log(`  Dest:   ${backupPath}`);
+
+  try {
+    // Use SQLite backup API for consistency
+    const db = getDb();
+    db.exec('VACUUM INTO ?', [backupPath]);
+  } catch (e) {
+    // Fallback to file copy
+    copyFileSync(dbPath, backupPath);
+  }
+
+  const size = getDbSize();
+  console.log(`  Size:   ${formatBytes(size)}`);
+  console.log('Backup complete.');
+}
+
+function dbPrune(args, flags) {
+  if (!isDatabaseInitialized()) {
+    console.log('Database not initialized.');
+    return;
+  }
+
+  const days = parseInt(args[0]) || 90;
+  const dryRun = flags['dry-run'] || flags.dryRun;
+  const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const db = getDb();
+
+  // Count sessions to be deleted
+  const toDelete = db.prepare(`
+    SELECT COUNT(*) as count FROM sessions
+    WHERE last_active_at < ? OR (last_active_at IS NULL AND created_at < ?)
+  `).get(cutoffDate, cutoffDate);
+
+  const total = db.prepare('SELECT COUNT(*) as count FROM sessions').get();
+
+  console.log(`Sessions older than ${days} days: ${toDelete.count}`);
+  console.log(`Total sessions: ${total.count}`);
+  console.log(`Cutoff date: ${cutoffDate.slice(0, 10)}`);
+
+  if (toDelete.count === 0) {
+    console.log('\nNo sessions to prune.');
+    return;
+  }
+
+  if (dryRun) {
+    console.log('\n(Dry run - no changes made)');
+    return;
+  }
+
+  if (!flags.force) {
+    console.error(`\nThis will delete ${toDelete.count} sessions and their turns.`);
+    console.error('Use --force to confirm, or --dry-run to preview.');
+    process.exit(1);
+  }
+
+  console.log('\nDeleting old sessions...');
+
+  // Get session IDs to delete
+  const sessionIds = db.prepare(`
+    SELECT id FROM sessions
+    WHERE last_active_at < ? OR (last_active_at IS NULL AND created_at < ?)
+  `).all(cutoffDate, cutoffDate).map(r => r.id);
+
+  // Delete related data
+  let turnsDeleted = 0;
+  let toolCallsDeleted = 0;
+
+  for (const sessionId of sessionIds) {
+    // Delete tool calls for this session's turns
+    const turnIds = db.prepare('SELECT id FROM turns WHERE session_id = ?').all(sessionId).map(r => r.id);
+    for (const turnId of turnIds) {
+      const result = db.prepare('DELETE FROM tool_calls WHERE turn_id = ?').run(turnId);
+      toolCallsDeleted += result.changes;
+    }
+
+    // Delete turns
+    const turnResult = db.prepare('DELETE FROM turns WHERE session_id = ?').run(sessionId);
+    turnsDeleted += turnResult.changes;
+  }
+
+  // Delete sessions
+  const sessionResult = db.prepare(`
+    DELETE FROM sessions
+    WHERE last_active_at < ? OR (last_active_at IS NULL AND created_at < ?)
+  `).run(cutoffDate, cutoffDate);
+
+  console.log(`  Sessions deleted: ${sessionResult.changes}`);
+  console.log(`  Turns deleted: ${turnsDeleted}`);
+  console.log(`  Tool calls deleted: ${toolCallsDeleted}`);
+  console.log('\nPrune complete. Run "rudi db vacuum" to reclaim disk space.');
+}
+
+function dbTables(flags) {
+  if (!isDatabaseInitialized()) {
+    console.log('Database not initialized.');
+    return;
+  }
+
+  const db = getDb();
+
+  // Get all tables
+  const tables = db.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `).all();
+
+  if (flags.json) {
+    const result = {};
+    for (const { name } of tables) {
+      try {
+        const row = db.prepare(`SELECT COUNT(*) as count FROM "${name}"`).get();
+        result[name] = row.count;
+      } catch (e) {
+        result[name] = -1;
+      }
+    }
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log('\nDatabase Tables');
+  console.log('═'.repeat(40));
+
+  let totalRows = 0;
+  for (const { name } of tables) {
+    try {
+      const row = db.prepare(`SELECT COUNT(*) as count FROM "${name}"`).get();
+      console.log(`  ${name.padEnd(25)} ${row.count.toLocaleString().padStart(10)}`);
+      totalRows += row.count;
+    } catch (e) {
+      console.log(`  ${name.padEnd(25)} ${'error'.padStart(10)}`);
+    }
+  }
+
+  console.log('─'.repeat(40));
+  console.log(`  ${'Total'.padEnd(25)} ${totalRows.toLocaleString().padStart(10)}`);
+  console.log(`\n  Size: ${formatBytes(getDbSize())}`);
 }

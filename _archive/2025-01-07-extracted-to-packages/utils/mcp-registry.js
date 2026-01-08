@@ -1,10 +1,16 @@
 /**
  * MCP Registry - Register/unregister MCP servers in agent configs
  *
- * Agents supported:
- * - Claude: ~/.claude/settings.json (JSON)
- * - Codex: ~/.codex/config.toml (TOML)
- * - Gemini: ~/.gemini/settings.json (JSON)
+ * Supported agents (9 total):
+ * - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
+ * - Claude Code: ~/.claude/settings.json
+ * - Cursor: ~/.cursor/mcp.json
+ * - Windsurf: ~/.codeium/windsurf/mcp_config.json
+ * - Cline: ~/Documents/Cline/cline_mcp_settings.json
+ * - Zed: ~/.zed/settings.json (uses context_servers key)
+ * - VS Code/Copilot: ~/Library/Application Support/Code/User/mcp.json
+ * - Gemini: ~/.gemini/settings.json
+ * - Codex: ~/.codex/config.toml (TOML format)
  *
  * When a stack is installed, register it as an MCP server.
  * When a stack is uninstalled, remove it from agent configs.
@@ -13,15 +19,13 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import {
+  AGENT_CONFIGS as AGENT_MANIFEST,
+  findAgentConfig,
+  getInstalledAgents as getDetectedAgents,
+} from './agents.js';
 
 const HOME = os.homedir();
-
-// Agent config paths
-const AGENT_CONFIGS = {
-  claude: path.join(HOME, '.claude', 'settings.json'),
-  codex: path.join(HOME, '.codex', 'config.toml'),
-  gemini: path.join(HOME, '.gemini', 'settings.json'),
-};
 
 // =============================================================================
 // JSON Utilities
@@ -291,32 +295,35 @@ async function readStackEnv(installPath) {
  */
 async function buildMcpConfig(stackId, installPath, manifest) {
   // Check if this is an MCP stack
-  // Pattern 1: manifest.mcp object (explicit MCP config)
-  // Pattern 2: manifest.command array (legacy format)
+  // Pattern 1: manifest.command array (new schema)
+  // Pattern 2: manifest.mcp object (legacy MCP config)
 
   let command;
   let args = [];
   const cwd = installPath;
 
-  // Pattern 1: Explicit MCP config (preferred)
-  if (manifest.mcp) {
-    command = manifest.mcp.command;
-    args = manifest.mcp.args || [];
-    // Resolve relative paths
+  const resolveRelativePath = (value) => {
+    if (!value || path.isAbsolute(value)) return value;
+    const isPathLike = value.startsWith('.') || value.includes('/') || value.includes('\\');
+    return isPathLike ? path.join(installPath, value) : value;
+  };
+
+  // Pattern 1: Command array (preferred)
+  if (manifest.command) {
+    const cmdArray = Array.isArray(manifest.command) ? manifest.command : [manifest.command];
+    command = resolveRelativePath(cmdArray[0]);
+    args = cmdArray.slice(1).map(arg => resolveRelativePath(arg));
+  }
+  // Pattern 2: Explicit MCP config (legacy)
+  else if (manifest.mcp) {
+    command = resolveRelativePath(manifest.mcp.command);
+    args = (manifest.mcp.args || []).map(arg => resolveRelativePath(arg));
+    // Resolve explicit entry override if provided
     if (manifest.mcp.entry) {
       args = args.map(arg =>
         arg === manifest.mcp.entry ? path.join(installPath, manifest.mcp.entry) : arg
       );
     }
-  }
-  // Pattern 2: Command array (legacy)
-  else if (manifest.command) {
-    const cmdArray = manifest.command;
-    command = cmdArray[0];
-    args = cmdArray.slice(1).map(arg =>
-      // Resolve relative paths like "dist/index.js"
-      arg.includes('/') ? path.join(installPath, arg) : arg
-    );
   }
   // Not an MCP stack
   else {
@@ -571,27 +578,103 @@ export async function unregisterMcpGemini(stackId) {
 }
 
 // =============================================================================
-// Combined Operations
+// Combined Operations (using agent manifest from agents.js)
 // =============================================================================
 
 /**
- * Check which agents are installed in ~/.prompt-stack/agents/
+ * Get list of installed agents (detected by their config files)
  */
-async function getInstalledAgents() {
-  const agentsDir = path.join(HOME, '.prompt-stack', 'agents');
-  const installed = [];
+function getInstalledAgentIds() {
+  return getDetectedAgents().map(a => a.id);
+}
 
-  for (const agent of ['claude', 'codex', 'gemini']) {
-    const agentPath = path.join(agentsDir, agent);
-    try {
-      await fs.access(agentPath);
-      installed.push(agent);
-    } catch {
-      // Agent not installed
-    }
+/**
+ * Register MCP server in any agent's config (generic)
+ * Handles different JSON keys per agent (mcpServers, context_servers, servers)
+ */
+async function registerMcpGeneric(agentId, stackId, installPath, manifest) {
+  const agentConfig = AGENT_MANIFEST.find(a => a.id === agentId);
+  if (!agentConfig) {
+    return { success: false, error: `Unknown agent: ${agentId}` };
   }
 
-  return installed;
+  const configPath = findAgentConfig(agentConfig);
+  if (!configPath) {
+    return { success: true, skipped: true, reason: 'Agent not installed' };
+  }
+
+  // Codex uses TOML
+  if (agentId === 'codex') {
+    return registerMcpCodex(stackId, installPath, manifest);
+  }
+
+  try {
+    const mcpConfig = await buildMcpConfig(stackId, installPath, manifest);
+    if (!mcpConfig) {
+      return { success: true, skipped: true, reason: 'Not an MCP stack' };
+    }
+
+    // Add type for Claude Desktop/Code
+    if (agentId.startsWith('claude')) {
+      mcpConfig.type = 'stdio';
+    }
+
+    const settings = await readJson(configPath);
+    const key = agentConfig.key;
+
+    if (!settings[key]) {
+      settings[key] = {};
+    }
+
+    settings[key][stackId] = mcpConfig;
+
+    await writeJson(configPath, settings);
+
+    console.log(`  Registered MCP in ${agentConfig.name}: ${stackId}`);
+    return { success: true, configPath };
+  } catch (error) {
+    console.error(`  Failed to register MCP in ${agentConfig.name}: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Unregister MCP server from any agent's config (generic)
+ */
+async function unregisterMcpGeneric(agentId, stackId) {
+  const agentConfig = AGENT_MANIFEST.find(a => a.id === agentId);
+  if (!agentConfig) {
+    return { success: false, error: `Unknown agent: ${agentId}` };
+  }
+
+  const configPath = findAgentConfig(agentConfig);
+  if (!configPath) {
+    return { success: true, skipped: true, reason: 'Agent not installed' };
+  }
+
+  // Codex uses TOML
+  if (agentId === 'codex') {
+    return unregisterMcpCodex(stackId);
+  }
+
+  try {
+    const settings = await readJson(configPath);
+    const key = agentConfig.key;
+
+    if (!settings[key] || !settings[key][stackId]) {
+      return { success: true, skipped: true, reason: 'Server not found' };
+    }
+
+    delete settings[key][stackId];
+
+    await writeJson(configPath, settings);
+
+    console.log(`  Unregistered MCP from ${agentConfig.name}: ${stackId}`);
+    return { success: true, configPath };
+  } catch (error) {
+    console.error(`  Failed to unregister MCP from ${agentConfig.name}: ${error.message}`);
+    return { success: false, error: error.message };
+  }
 }
 
 /**
@@ -599,26 +682,37 @@ async function getInstalledAgents() {
  * @param {string} stackId - Stack ID (e.g., 'google-ai')
  * @param {string} installPath - Path to installed stack
  * @param {object} manifest - Stack manifest
- * @param {string[]} [targetAgents] - Optional: specific agents to register (e.g., ['claude'])
+ * @param {string[]} [targetAgents] - Optional: specific agent IDs to register
  */
 export async function registerMcpAll(stackId, installPath, manifest, targetAgents = null) {
-  // Determine which agents to register to
-  const agents = targetAgents || await getInstalledAgents();
+  // Get all installed agents or filter to target list
+  let agentIds = getInstalledAgentIds();
+
+  if (targetAgents && targetAgents.length > 0) {
+    // Map short names to full IDs (claude -> claude-code, etc.)
+    const idMap = {
+      'claude': 'claude-code',
+      'codex': 'codex',
+      'gemini': 'gemini',
+    };
+
+    const targetIds = targetAgents.map(a => idMap[a] || a);
+    agentIds = agentIds.filter(id => targetIds.includes(id));
+  }
 
   const results = {};
 
-  for (const agent of agents) {
-    switch (agent) {
-      case 'claude':
-        results.claude = await registerMcpClaude(stackId, installPath, manifest);
-        break;
-      case 'codex':
-        results.codex = await registerMcpCodex(stackId, installPath, manifest);
-        break;
-      case 'gemini':
-        results.gemini = await registerMcpGemini(stackId, installPath, manifest);
-        break;
-    }
+  for (const agentId of agentIds) {
+    results[agentId] = await registerMcpGeneric(agentId, stackId, installPath, manifest);
+  }
+
+  // Summary
+  const registered = Object.entries(results)
+    .filter(([_, r]) => r.success && !r.skipped)
+    .map(([id]) => id);
+
+  if (registered.length > 0) {
+    console.log(`  ✓ Registered to ${registered.length} agent(s): ${registered.join(', ')}`);
   }
 
   return results;
@@ -627,36 +721,79 @@ export async function registerMcpAll(stackId, installPath, manifest, targetAgent
 /**
  * Unregister MCP from all installed agents (or specific agents if provided)
  * @param {string} stackId - Stack ID (e.g., 'google-ai')
- * @param {string[]} [targetAgents] - Optional: specific agents to unregister (e.g., ['claude'])
+ * @param {string[]} [targetAgents] - Optional: specific agent IDs to unregister
  */
 export async function unregisterMcpAll(stackId, targetAgents = null) {
-  // Determine which agents to unregister from
-  const agents = targetAgents || await getInstalledAgents();
+  // Get all installed agents or filter to target list
+  let agentIds = getInstalledAgentIds();
+
+  if (targetAgents && targetAgents.length > 0) {
+    const idMap = {
+      'claude': 'claude-code',
+      'codex': 'codex',
+      'gemini': 'gemini',
+    };
+
+    const targetIds = targetAgents.map(a => idMap[a] || a);
+    agentIds = agentIds.filter(id => targetIds.includes(id));
+  }
 
   const results = {};
 
-  for (const agent of agents) {
-    switch (agent) {
-      case 'claude':
-        results.claude = await unregisterMcpClaude(stackId);
-        break;
-      case 'codex':
-        results.codex = await unregisterMcpCodex(stackId);
-        break;
-      case 'gemini':
-        results.gemini = await unregisterMcpGemini(stackId);
-        break;
-    }
+  for (const agentId of agentIds) {
+    results[agentId] = await unregisterMcpGeneric(agentId, stackId);
   }
 
   return results;
 }
 
 /**
- * List registered MCPs in Claude
+ * List registered MCPs in Claude Code
  */
 export async function listRegisteredMcps() {
-  const configPath = AGENT_CONFIGS.claude;
+  const claudeConfig = AGENT_MANIFEST.find(a => a.id === 'claude-code');
+  const configPath = findAgentConfig(claudeConfig);
+  if (!configPath) return [];
+
   const settings = await readJson(configPath);
   return Object.keys(settings.mcpServers || {});
+}
+
+/**
+ * Get summary of all MCP registrations across agents
+ */
+export async function getMcpRegistrationSummary(stackId) {
+  const results = {};
+
+  for (const agentConfig of AGENT_MANIFEST) {
+    const configPath = findAgentConfig(agentConfig);
+    if (!configPath) continue;
+
+    // Skip TOML for now
+    if (agentConfig.id === 'codex') continue;
+
+    try {
+      const settings = await readJson(configPath);
+      const servers = settings[agentConfig.key] || {};
+
+      if (stackId) {
+        results[agentConfig.id] = {
+          name: agentConfig.name,
+          registered: !!servers[stackId],
+          configPath,
+        };
+      } else {
+        results[agentConfig.id] = {
+          name: agentConfig.name,
+          serverCount: Object.keys(servers).length,
+          servers: Object.keys(servers),
+          configPath,
+        };
+      }
+    } catch {
+      // Skip agents with invalid configs
+    }
+  }
+
+  return results;
 }

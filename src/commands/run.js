@@ -2,9 +2,9 @@
  * Run command - execute a stack
  */
 
-import { isPackageInstalled, getPackagePath } from '@prompt-stack/core';
-import { runStack, checkSecrets } from '@prompt-stack/runner';
-import { parseStackManifest, findStackManifest } from '@prompt-stack/manifest';
+import { isPackageInstalled, getPackagePath } from '@learnrudi/core';
+import { runStack, checkSecrets } from '@learnrudi/runner';
+import { parseStackManifest, findStackManifest } from '@learnrudi/manifest';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,8 +12,8 @@ export async function cmdRun(args, flags) {
   const stackId = args[0];
 
   if (!stackId) {
-    console.error('Usage: pstack run <stack> [options]');
-    console.error('Example: pstack run pdf-creator');
+    console.error('Usage: rudi run <stack> [options]');
+    console.error('Example: rudi run pdf-creator');
     process.exit(1);
   }
 
@@ -23,7 +23,7 @@ export async function cmdRun(args, flags) {
   // Check if installed
   if (!isPackageInstalled(fullId)) {
     console.error(`Stack not installed: ${stackId}`);
-    console.error(`Install with: pstack install ${stackId}`);
+    console.error(`Install with: rudi install ${stackId}`);
     process.exit(1);
   }
 
@@ -63,7 +63,7 @@ export async function cmdRun(args, flags) {
       for (const name of missing) {
         console.error(`  - ${name}`);
       }
-      console.error(`\nSet with: pstack secrets set <name>`);
+      console.error(`\nSet with: rudi secrets set <name>`);
       process.exit(1);
     }
   }

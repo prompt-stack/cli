@@ -2,15 +2,15 @@
  * Auth command - Authenticate OAuth-based stacks
  *
  * Usage:
- *   pstack auth <stack-id>              # Auth with default account
- *   pstack auth <stack-id> user@gmail.com
+ *   rudi auth <stack-id>              # Auth with default account
+ *   rudi auth <stack-id> user@gmail.com
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { listInstalled } from '@prompt-stack/core';
-import { PATHS } from '@prompt-stack/env';
+import { listInstalled } from '@learnrudi/core';
+import { PATHS } from '@learnrudi/env';
 import * as net from 'net';
 
 /**
@@ -103,8 +103,8 @@ export async function cmdAuth(args, flags) {
   const accountEmail = args[1];
 
   if (!stackId) {
-    console.error('Usage: pstack auth <stack-id> [account-email]');
-    console.error('Example: pstack auth google-workspace user@gmail.com');
+    console.error('Usage: rudi auth <stack-id> [account-email]');
+    console.error('Example: rudi auth google-workspace user@gmail.com');
     process.exit(1);
   }
 

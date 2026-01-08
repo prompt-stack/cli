@@ -1,7 +1,7 @@
 /**
  * Tests for import module - parsing and cost calculation
  *
- * Run with: pnpm vitest run pstack-cli/db/import.test.js
+ * Run with: pnpm vitest run rudi-cli/db/import.test.js
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

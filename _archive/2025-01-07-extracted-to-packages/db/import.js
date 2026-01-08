@@ -1,9 +1,9 @@
 /**
- * Import module for pstack CLI
+ * Import module for RUDI CLI
  * Handles migration from sessions.json and importing from native provider directories
  */
 
-const { getDb, PROMPT_STACK_HOME } = require('./index');
+const { getDb, RUDI_HOME } = require('./index');
 const { calculateCostFromPricing } = require('./schema');
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +38,7 @@ function calculateCost(provider, model, usage) {
  * @returns {Object} Migration results
  */
 function migrateFromJson() {
-  const jsonPath = path.join(PROMPT_STACK_HOME, 'sessions.json');
+  const jsonPath = path.join(RUDI_HOME, 'sessions.json');
   const results = { sessions: 0, projects: 0, skipped: 0 };
 
   if (!fs.existsSync(jsonPath)) {
@@ -97,7 +97,7 @@ function migrateFromJson() {
           s.provider || 'claude',
           s.providerSessionId || null,
           s.projectId || null,
-          s.origin || 'promptstack',
+          s.origin || 'rudi',
           s.originDetail?.importedAt || null,
           s.originDetail?.nativeFile || null,
           s.title || null,

@@ -2,13 +2,24 @@
  * List command - list installed packages
  *
  * Usage:
- *   pstack list [kind]              List all or filter by kind
- *   pstack list prompts             List prompts
- *   pstack list prompts --category=coding   Filter by category
- *   pstack list --json              Output as JSON
+ *   rudi list [kind]              List all or filter by kind
+ *   rudi list prompts             List prompts
+ *   rudi list prompts --category=coding   Filter by category
+ *   rudi list stacks --detected   Show MCP servers from agent configs
+ *   rudi list --json              Output as JSON
  */
 
-import { listInstalled } from '@prompt-stack/core';
+import { listInstalled } from '@learnrudi/core';
+import { detectAllMcpServers, getInstalledAgents, getMcpServerSummary, AGENT_CONFIGS } from '@learnrudi/mcp';
+
+function pluralizeKind(kind) {
+  if (!kind) return 'packages';
+  return kind === 'binary' ? 'binaries' : `${kind}s`;
+}
+
+function headingForKind(kind) {
+  return kind === 'binary' ? 'BINARIES' : `${kind.toUpperCase()}S`;
+}
 
 export async function cmdList(args, flags) {
   let kind = args[0];
@@ -19,14 +30,86 @@ export async function cmdList(args, flags) {
     if (kind === 'stacks') kind = 'stack';
     if (kind === 'prompts') kind = 'prompt';
     if (kind === 'runtimes') kind = 'runtime';
-    if (kind === 'tools') kind = 'tool';
+    if (kind === 'binaries') kind = 'binary';
+    if (kind === 'tools') kind = 'binary';
     if (kind === 'agents') kind = 'agent';
 
-    if (!['stack', 'prompt', 'runtime', 'tool', 'agent'].includes(kind)) {
+    if (!['stack', 'prompt', 'runtime', 'binary', 'agent'].includes(kind)) {
       console.error(`Invalid kind: ${kind}`);
-      console.error(`Valid kinds: stack, prompt, runtime, tool, agent`);
+      console.error(`Valid kinds: stack, prompt, runtime, binary, agent`);
       process.exit(1);
     }
+  }
+
+  // Handle --detected flag for agents (show which agents are installed)
+  if (flags.detected && kind === 'agent') {
+    const installedAgents = getInstalledAgents();
+    const summary = getMcpServerSummary();
+
+    if (flags.json) {
+      console.log(JSON.stringify({ installedAgents, summary }, null, 2));
+      return;
+    }
+
+    console.log(`\nDETECTED AI AGENTS (${installedAgents.length}/${AGENT_CONFIGS.length}):`);
+    console.log('─'.repeat(50));
+
+    for (const agent of AGENT_CONFIGS) {
+      const installed = installedAgents.find(a => a.id === agent.id);
+      const serverCount = summary[agent.id]?.serverCount || 0;
+
+      if (installed) {
+        console.log(`  ✓ ${agent.name}`);
+        console.log(`    ${serverCount} MCP server(s)`);
+        console.log(`    ${installed.configFile}`);
+      } else {
+        console.log(`  ○ ${agent.name} (not installed)`);
+      }
+    }
+
+    console.log(`\nInstalled: ${installedAgents.length} of ${AGENT_CONFIGS.length} agents`);
+    return;
+  }
+
+  // Handle --detected flag for stacks (show MCP servers from agent configs)
+  if (flags.detected && kind === 'stack') {
+    const servers = detectAllMcpServers();
+
+    if (flags.json) {
+      console.log(JSON.stringify(servers, null, 2));
+      return;
+    }
+
+    if (servers.length === 0) {
+      console.log('No MCP servers detected in agent configs.');
+      console.log('\nChecked these agents:');
+      for (const agent of AGENT_CONFIGS) {
+        console.log(`  - ${agent.name}`);
+      }
+      return;
+    }
+
+    // Group by agent
+    const byAgent = {};
+    for (const server of servers) {
+      if (!byAgent[server.agent]) byAgent[server.agent] = [];
+      byAgent[server.agent].push(server);
+    }
+
+    console.log(`\nDETECTED MCP SERVERS (${servers.length}):`);
+    console.log('─'.repeat(50));
+
+    for (const [agentId, agentServers] of Object.entries(byAgent)) {
+      const agentName = agentServers[0]?.agentName || agentId;
+      console.log(`\n  ${agentName.toUpperCase()} (${agentServers.length}):`);
+      for (const server of agentServers) {
+        console.log(`    📦 ${server.name}`);
+        console.log(`       ${server.command} ${server.cwd ? `(${server.cwd})` : ''}`);
+      }
+    }
+
+    console.log(`\nTotal: ${servers.length} MCP server(s) configured`);
+    return;
   }
 
   try {
@@ -45,13 +128,13 @@ export async function cmdList(args, flags) {
 
     if (packages.length === 0) {
       if (categoryFilter) {
-        console.log(`No ${kind || 'packages'}s found in category: ${categoryFilter}`);
+        console.log(`No ${pluralizeKind(kind)} found in category: ${categoryFilter}`);
       } else if (kind) {
-        console.log(`No ${kind}s installed.`);
+        console.log(`No ${pluralizeKind(kind)} installed.`);
       } else {
         console.log('No packages installed.');
       }
-      console.log(`\nInstall with: pstack install <package>`);
+      console.log(`\nInstall with: rudi install <package>`);
       return;
     }
 
@@ -82,7 +165,7 @@ export async function cmdList(args, flags) {
       }
 
       console.log(`\nTotal: ${packages.length} prompt(s)`);
-      console.log(`\nFilter by category: pstack list prompts --category=coding`);
+      console.log(`\nFilter by category: rudi list prompts --category=coding`);
       return;
     }
 
@@ -91,7 +174,7 @@ export async function cmdList(args, flags) {
       stack: packages.filter(p => p.kind === 'stack'),
       prompt: packages.filter(p => p.kind === 'prompt'),
       runtime: packages.filter(p => p.kind === 'runtime'),
-      tool: packages.filter(p => p.kind === 'tool'),
+      binary: packages.filter(p => p.kind === 'binary'),
       agent: packages.filter(p => p.kind === 'agent')
     };
 
@@ -101,7 +184,7 @@ export async function cmdList(args, flags) {
       if (pkgs.length === 0) continue;
       if (kind && kind !== pkgKind) continue;
 
-      console.log(`\n${pkgKind.toUpperCase()}S (${pkgs.length}):`);
+      console.log(`\n${headingForKind(pkgKind)} (${pkgs.length}):`);
       console.log('─'.repeat(50));
 
       for (const pkg of pkgs) {

@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   project_id TEXT,
 
   -- Origin tracking
-  origin TEXT NOT NULL CHECK (origin IN ('promptstack', 'provider-import', 'mixed')),
+  origin TEXT NOT NULL CHECK (origin IN ('rudi', 'provider-import', 'mixed')),
   origin_imported_at TEXT,
   origin_native_file TEXT,
 

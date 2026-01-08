@@ -1,19 +1,20 @@
-# pstack CLI
+# RUDI CLI
 
-Package manager for Prompt Stack - install stacks, manage secrets, run workflows.
+Package manager for RUDI - install stacks, manage secrets, run workflows.
 
 ## Commands
 
 ```bash
-pstack search <query>     # Search registry
-pstack search --all       # List all available packages
-pstack install <pkg>      # Install a stack/runtime/tool
-pstack remove <pkg>       # Uninstall a package
-pstack list [kind]        # List installed (stacks, runtimes, tools, agents)
-pstack run <stack>        # Run a stack
-pstack secrets            # Manage secrets
-pstack update [pkg]       # Update packages
-pstack doctor             # Check system health
+rudi search <query>     # Search registry
+rudi search --all       # List all available packages
+rudi install <pkg>      # Install a stack/runtime/tool
+rudi remove <pkg>       # Uninstall a package
+rudi list [kind]        # List installed (stacks, runtimes, tools, agents)
+rudi run <stack>        # Run a stack
+rudi secrets            # Manage secrets
+rudi update [pkg]       # Update packages
+rudi import sessions    # Import sessions from Claude, Codex, Gemini
+rudi doctor             # Check system health
 ```
 
 ## Architecture
@@ -21,28 +22,28 @@ pstack doctor             # Check system health
 ```
 src/index.js → commands/*.js
       ↓
-@prompt-stack/env         # PATHS, platform detection
-@prompt-stack/core        # db, installer, resolver
-@prompt-stack/registry-client  # fetch from GitHub
+@learnrudi/env         # PATHS, platform detection
+@learnrudi/core        # db, installer, resolver
+@learnrudi/registry-client  # fetch from GitHub
       ↓
-~/.prompt-stack/
+~/.rudi/
 ├── stacks/               # Installed MCP stacks
 ├── runtimes/             # Node, Python, Deno
 ├── tools/                # ffmpeg, ripgrep, etc.
 ├── agents/               # Claude, Codex, Gemini CLIs
-└── prompt-stack.db       # Shared with Studio
+└── rudi.db               # Shared with Studio
 ```
 
 ## Registry
 
-- Index: `https://raw.githubusercontent.com/prompt-stack/registry/main/index.json`
-- Binaries: `https://github.com/prompt-stack/registry/releases/download/v1.0.0/`
-- Local dev fallback: `/Users/hoff/dev/prompt-stack/registry/index.json`
+- Index: `https://raw.githubusercontent.com/learn-rudi/registry/main/index.json`
+- Binaries: `https://github.com/learn-rudi/registry/releases/download/v1.0.0/`
+- Local dev fallback: `/Users/hoff/dev/rudi/registry/index.json`
 
 ## Development
 
 ```bash
-cd /Users/hoff/dev/prompt-stack/cli
-npm link                  # Add pstack to PATH
-pstack search --all       # Test
+cd /Users/hoff/dev/rudi/cli
+npm link                  # Add rudi to PATH
+rudi search --all         # Test
 ```

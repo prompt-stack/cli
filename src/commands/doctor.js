@@ -5,14 +5,16 @@
 import {
   PATHS,
   ensureDirectories,
-  getInstalledPackages
-} from '@prompt-stack/core';
-import { isDatabaseInitialized, initSchema } from '@prompt-stack/runner/db';
-import { listSecretNames } from '@prompt-stack/runner';
+  getInstalledPackages,
+  getAvailableDeps,
+  getAllDepsFromRegistry
+} from '@learnrudi/core';
+import { isDatabaseInitialized, initSchema } from '@learnrudi/db';
+import { listSecretNames } from '@learnrudi/runner';
 import fs from 'fs';
 
 export async function cmdDoctor(args, flags) {
-  console.log('Prompt Stack Health Check');
+  console.log('RUDI Health Check');
   console.log('═'.repeat(50));
 
   const issues = [];
@@ -25,7 +27,7 @@ export async function cmdDoctor(args, flags) {
     { path: PATHS.stacks, name: 'Stacks' },
     { path: PATHS.prompts, name: 'Prompts' },
     { path: PATHS.runtimes, name: 'Runtimes' },
-    { path: PATHS.tools, name: 'Tools' },
+    { path: PATHS.binaries, name: 'Binaries' },
     { path: PATHS.agents, name: 'Agents' },
     { path: PATHS.db, name: 'Database' },
     { path: PATHS.cache, name: 'Cache' }
@@ -85,11 +87,52 @@ export async function cmdDoctor(args, flags) {
     console.log(`  ✗ Error reading secrets: ${error.message}`);
   }
 
+  // Check runtimes and binaries
+  console.log('\n⚙️  Runtimes');
+  try {
+    // Use registry for --all flag, otherwise just check common/installed
+    const { runtimes, binaries } = flags.all
+      ? await getAllDepsFromRegistry()
+      : getAvailableDeps();
+
+    for (const rt of runtimes) {
+      const icon = rt.available ? '✓' : '○';
+      const version = rt.version ? `v${rt.version}` : '';
+      const source = rt.available
+        ? `(${rt.source})`
+        : (flags.all ? 'available' : 'not found');
+      console.log(`  ${icon} ${rt.name}: ${version} ${source}`);
+    }
+
+    console.log('\n🔧 Binaries');
+    for (const bin of binaries) {
+      const icon = bin.available ? '✓' : '○';
+      const version = bin.version ? `v${bin.version}` : '';
+      const managed = bin.managed === false ? ' (external)' : '';
+      const source = bin.available
+        ? `(${bin.source})`
+        : (flags.all ? `available${managed}` : 'not found');
+      console.log(`  ${icon} ${bin.name}: ${version} ${source}`);
+    }
+
+    if (flags.all) {
+      const availableRuntimes = runtimes.filter(r => !r.available).length;
+      const availableBinaries = binaries.filter(b => !b.available && b.managed !== false).length;
+      if (availableRuntimes + availableBinaries > 0) {
+        console.log(`\n  Install with: rudi install runtime:<name> or rudi install binary:<name>`);
+      }
+    }
+  } catch (error) {
+    console.log(`  ✗ Error checking dependencies: ${error.message}`);
+  }
+
   // Check Node.js version
-  console.log('\n⚙️  Environment');
+  console.log('\n📍 Environment');
   const nodeVersion = process.version;
   const nodeOk = parseInt(nodeVersion.slice(1)) >= 18;
   console.log(`  ${nodeOk ? '✓' : '✗'} Node.js: ${nodeVersion} ${nodeOk ? '' : '(requires >=18)'}`);
+  console.log(`  ✓ Platform: ${process.platform}-${process.arch}`);
+  console.log(`  ✓ RUDI Home: ${PATHS.home}`);
 
   if (!nodeOk) {
     issues.push('Node.js version too old (requires >=18)');

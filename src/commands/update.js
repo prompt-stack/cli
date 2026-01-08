@@ -5,8 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import { PATHS, getPackagePath, parsePackageId } from '@prompt-stack/env';
-import { getPackage } from '@prompt-stack/registry-client';
+import { PATHS, getPackagePath, parsePackageId } from '@learnrudi/env';
+import { getPackage } from '@learnrudi/registry-client';
 
 export async function cmdUpdate(args, flags) {
   const pkgId = args[0];
@@ -99,7 +99,7 @@ async function updatePackage(pkgId, flags) {
   // Handle tarball packages - re-download
   if (kind === 'runtime' && !pkg.npmPackage && !pkg.pipPackage) {
     try {
-      const { downloadRuntime } = await import('@prompt-stack/registry-client');
+      const { downloadRuntime } = await import('@learnrudi/registry-client');
 
       // Remove old version
       fs.rmSync(installPath, { recursive: true, force: true });
