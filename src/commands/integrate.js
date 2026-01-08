@@ -1,11 +1,11 @@
 /**
- * Integrate command - Wire RUDI stacks into agent configs
+ * Integrate command - Wire RUDI router into agent configs
  *
  * Each integration:
  * - Detects the agent's config format
  * - Creates backup before modifying
  * - Patches idempotently (won't duplicate entries)
- * - Registers the generic shim, not individual stacks
+ * - Registers the rudi-router (single entry, all stacks)
  *
  * Usage:
  *   rudi integrate claude      Wire up Claude Desktop/Code
@@ -21,52 +21,19 @@ import { PATHS } from '@learnrudi/env';
 import { AGENT_CONFIGS, findAgentConfig, getInstalledAgents } from '@learnrudi/mcp';
 
 const HOME = os.homedir();
-const SHIM_PATH = path.join(PATHS.home, 'shims', 'rudi-mcp');
+const ROUTER_SHIM_PATH = path.join(PATHS.home, 'shims', 'rudi-router');
 
 /**
- * Get list of installed stacks
+ * Check if router shim exists
  */
-function getInstalledStacks() {
-  const stacksDir = PATHS.stacks;
-  if (!fs.existsSync(stacksDir)) return [];
-
-  return fs.readdirSync(stacksDir, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-    .filter(d => fs.existsSync(path.join(stacksDir, d.name, 'manifest.json')))
-    .map(d => d.name);
-}
-
-/**
- * Ensure the generic shim exists
- */
-function ensureShim() {
-  const shimsDir = path.dirname(SHIM_PATH);
-  if (!fs.existsSync(shimsDir)) {
-    fs.mkdirSync(shimsDir, { recursive: true });
+function checkRouterShim() {
+  if (!fs.existsSync(ROUTER_SHIM_PATH)) {
+    throw new Error(
+      `Router shim not found at ${ROUTER_SHIM_PATH}\n` +
+      `Run: npm install -g @learnrudi/cli@latest`
+    );
   }
-
-  // The shim calls npx @learnrudi/cli which works globally
-  // Or if rudi is in PATH, it can use that directly
-  const shimContent = `#!/usr/bin/env bash
-set -euo pipefail
-# Try rudi in PATH first, fall back to npx
-if command -v rudi &> /dev/null; then
-  exec rudi mcp "$1"
-else
-  exec npx --yes @learnrudi/cli mcp "$1"
-fi
-`;
-
-  // Check if we need to write (or update)
-  if (fs.existsSync(SHIM_PATH)) {
-    const existing = fs.readFileSync(SHIM_PATH, 'utf-8');
-    if (existing === shimContent) {
-      return { created: false, path: SHIM_PATH };
-    }
-  }
-
-  fs.writeFileSync(SHIM_PATH, shimContent, { mode: 0o755 });
-  return { created: true, path: SHIM_PATH };
+  return ROUTER_SHIM_PATH;
 }
 
 /**
@@ -106,13 +73,13 @@ function writeJsonConfig(configPath, config) {
 }
 
 /**
- * Build MCP server entry for a stack (using shim)
+ * Build MCP server entry for the router
  * Format varies slightly by agent
  */
-function buildMcpEntry(stackName, agentId) {
+function buildRouterEntry(agentId) {
   const base = {
-    command: SHIM_PATH,
-    args: [stackName],
+    command: ROUTER_SHIM_PATH,
+    args: [],
   };
 
   // Claude Desktop and Claude Code need "type": "stdio"
@@ -124,9 +91,10 @@ function buildMcpEntry(stackName, agentId) {
 }
 
 /**
- * Integrate stacks into a specific agent
+ * Integrate RUDI router into a specific agent
+ * Also cleans up old individual rudi-mcp entries
  */
-async function integrateAgent(agentId, stacks, flags) {
+async function integrateAgent(agentId, flags) {
   const agentConfig = AGENT_CONFIGS.find(a => a.id === agentId);
   if (!agentConfig) {
     console.error(`Unknown agent: ${agentId}`);
@@ -136,7 +104,6 @@ async function integrateAgent(agentId, stacks, flags) {
   const configPath = findAgentConfig(agentConfig);
 
   // If config doesn't exist, create it
-  const configDir = configPath ? path.dirname(configPath) : null;
   const targetPath = configPath || path.join(HOME, agentConfig.paths[process.platform]?.[0] || agentConfig.paths.darwin[0]);
 
   console.log(`\n${agentConfig.name}:`);
@@ -159,32 +126,43 @@ async function integrateAgent(agentId, stacks, flags) {
     config[key] = {};
   }
 
-  // Add/update each stack
-  let added = 0;
-  let updated = 0;
-
-  for (const stackName of stacks) {
-    const entry = buildMcpEntry(stackName, agentId);
-    const existing = config[key][stackName];
-
-    if (!existing) {
-      config[key][stackName] = entry;
-      added++;
-    } else if (existing.command !== entry.command || JSON.stringify(existing.args) !== JSON.stringify(entry.args)) {
-      config[key][stackName] = entry;
-      updated++;
+  // Clean up old individual rudi-mcp entries
+  const rudiMcpShimPath = path.join(PATHS.home, 'shims', 'rudi-mcp');
+  const removedEntries = [];
+  for (const [serverName, serverConfig] of Object.entries(config[key])) {
+    if (serverConfig.command === rudiMcpShimPath) {
+      delete config[key][serverName];
+      removedEntries.push(serverName);
     }
   }
-
-  // Write config
-  if (added > 0 || updated > 0) {
-    writeJsonConfig(targetPath, config);
-    console.log(`  Added: ${added}, Updated: ${updated}`);
-  } else {
-    console.log(`  Already up to date`);
+  if (removedEntries.length > 0) {
+    console.log(`  Removed old entries: ${removedEntries.join(', ')}`);
   }
 
-  return { success: true, added, updated };
+  // Add/update the RUDI router entry
+  const routerEntry = buildRouterEntry(agentId);
+  const existing = config[key]['rudi'];
+
+  let action = 'none';
+  if (!existing) {
+    config[key]['rudi'] = routerEntry;
+    action = 'added';
+  } else if (existing.command !== routerEntry.command || JSON.stringify(existing.args) !== JSON.stringify(routerEntry.args)) {
+    config[key]['rudi'] = routerEntry;
+    action = 'updated';
+  }
+
+  // Write config if anything changed
+  if (action !== 'none' || removedEntries.length > 0) {
+    writeJsonConfig(targetPath, config);
+    if (action !== 'none') {
+      console.log(`  ${action === 'added' ? '✓ Added' : '✓ Updated'} rudi router`);
+    }
+  } else {
+    console.log(`  ✓ Already configured`);
+  }
+
+  return { success: true, action, removed: removedEntries };
 }
 
 /**
@@ -193,9 +171,24 @@ async function integrateAgent(agentId, stacks, flags) {
 export async function cmdIntegrate(args, flags) {
   const target = args[0];
 
+  // List detected agents
+  if (flags.list || target === 'list') {
+    const installed = getInstalledAgents();
+    console.log('\nDetected agents:');
+    for (const agent of installed) {
+      console.log(`  ✓ ${agent.name}`);
+      console.log(`    ${agent.configFile}`);
+    }
+    if (installed.length === 0) {
+      console.log('  (none detected)');
+    }
+    return;
+  }
+
+  // Show help if no target
   if (!target) {
     console.log(`
-rudi integrate - Wire RUDI stacks into agent configs
+rudi integrate - Wire RUDI router into agent configs
 
 USAGE
   rudi integrate <agent>     Integrate with specific agent
@@ -222,34 +215,15 @@ EXAMPLES
     return;
   }
 
-  // List detected agents
-  if (flags.list || target === 'list') {
-    const installed = getInstalledAgents();
-    console.log('\nDetected agents:');
-    for (const agent of installed) {
-      console.log(`  ✓ ${agent.name}`);
-      console.log(`    ${agent.configFile}`);
-    }
-    if (installed.length === 0) {
-      console.log('  (none detected)');
-    }
+  // Check router shim exists
+  try {
+    checkRouterShim();
+  } catch (err) {
+    console.error(err.message);
     return;
   }
 
-  // Get installed stacks
-  const stacks = getInstalledStacks();
-  if (stacks.length === 0) {
-    console.log('No stacks installed. Install with: rudi install <stack>');
-    return;
-  }
-
-  console.log(`\nIntegrating ${stacks.length} stack(s)...`);
-
-  // Ensure shim exists
-  const shimResult = ensureShim();
-  if (shimResult.created) {
-    console.log(`Created shim: ${shimResult.path}`);
-  }
+  console.log(`\nWiring up RUDI router...`);
 
   // Determine which agents to integrate
   let targetAgents = [];
@@ -287,13 +261,10 @@ EXAMPLES
 
   // Dry run
   if (flags['dry-run']) {
-    console.log('\nDry run - would integrate:');
+    console.log('\nDry run - would add RUDI router to:');
     for (const agentId of targetAgents) {
       const agent = AGENT_CONFIGS.find(a => a.id === agentId);
-      console.log(`  ${agent?.name || agentId}:`);
-      for (const stack of stacks) {
-        console.log(`    - ${stack}`);
-      }
+      console.log(`  ${agent?.name || agentId}`);
     }
     return;
   }
@@ -301,12 +272,15 @@ EXAMPLES
   // Integrate each agent
   const results = [];
   for (const agentId of targetAgents) {
-    const result = await integrateAgent(agentId, stacks, flags);
+    const result = await integrateAgent(agentId, flags);
     results.push({ agent: agentId, ...result });
   }
 
   // Summary
   const successful = results.filter(r => r.success);
   console.log(`\n✓ Integrated with ${successful.length} agent(s)`);
-  console.log('\nRestart your agent(s) to use the new stacks.');
+  console.log('\nRestart your agent(s) to access all installed stacks.');
+  console.log('\nManage stacks:');
+  console.log('  rudi install <stack>   # Install a new stack');
+  console.log('  rudi index             # Rebuild tool cache');
 }
