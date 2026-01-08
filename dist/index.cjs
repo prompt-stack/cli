@@ -422,6 +422,18 @@ Installing...`);
             console.error(`  rudi install ${result.id}`);
             process.exit(1);
           }
+          try {
+            (0, import_core2.addStack)(result.id, {
+              path: result.path,
+              runtime: manifest.runtime || manifest.mcp?.runtime || "node",
+              command: manifest.command || (manifest.mcp?.command ? [manifest.mcp.command, ...manifest.mcp.args || []] : null),
+              secrets: getManifestSecrets(manifest),
+              version: manifest.version
+            });
+            console.log(`  \u2713 Updated rudi.json`);
+          } catch (err) {
+            console.log(`  \u26A0 Failed to update rudi.json: ${err.message}`);
+          }
           const { found, missing } = await checkSecrets(manifest);
           const envExampleKeys = await parseEnvExample(result.path);
           for (const key of envExampleKeys) {
@@ -440,6 +452,16 @@ Installing...`);
               if (existing === null) {
                 await (0, import_secrets.setSecret)(key, "");
               }
+              try {
+                (0, import_core2.updateSecretStatus)(key, false);
+              } catch {
+              }
+            }
+          }
+          for (const key of found) {
+            try {
+              (0, import_core2.updateSecretStatus)(key, true);
+            } catch {
             }
           }
           console.log(`
@@ -3691,6 +3713,140 @@ async function migrateConfigs(flags) {
   console.log("Restart your agents to use the updated configs.");
 }
 
+// src/commands/index-tools.js
+var import_core10 = require("@learnrudi/core");
+var import_core11 = require("@learnrudi/core");
+async function cmdIndex(args, flags) {
+  const stackFilter = args.length > 0 ? args : null;
+  const forceReindex = flags.force || false;
+  const jsonOutput = flags.json || false;
+  const config = (0, import_core11.readRudiConfig)();
+  if (!config) {
+    console.error("Error: rudi.json not found. Run `rudi doctor` to check setup.");
+    process.exit(1);
+  }
+  const installedStacks = Object.keys(config.stacks || {}).filter(
+    (id) => config.stacks[id].installed
+  );
+  if (installedStacks.length === 0) {
+    if (jsonOutput) {
+      console.log(JSON.stringify({ indexed: 0, failed: 0, stacks: [] }));
+    } else {
+      console.log("No installed stacks to index.");
+      console.log("\nInstall stacks with: rudi install <stack>");
+    }
+    return;
+  }
+  const stacksToIndex = stackFilter ? stackFilter.filter((id) => {
+    if (!installedStacks.includes(id)) {
+      if (!jsonOutput) {
+        console.log(`\u26A0 Stack not installed: ${id}`);
+      }
+      return false;
+    }
+    return true;
+  }) : installedStacks;
+  if (stacksToIndex.length === 0) {
+    if (jsonOutput) {
+      console.log(JSON.stringify({ indexed: 0, failed: 0, stacks: [] }));
+    } else {
+      console.log("No valid stacks to index.");
+    }
+    return;
+  }
+  const existingIndex = (0, import_core10.readToolIndex)();
+  if (existingIndex && !forceReindex && !stackFilter) {
+    const allCached = stacksToIndex.every((id) => {
+      const entry = existingIndex.byStack?.[id];
+      return entry && entry.tools && entry.tools.length > 0 && !entry.error;
+    });
+    if (allCached) {
+      const totalTools = stacksToIndex.reduce((sum, id) => {
+        return sum + (existingIndex.byStack[id]?.tools?.length || 0);
+      }, 0);
+      if (jsonOutput) {
+        console.log(JSON.stringify({
+          indexed: stacksToIndex.length,
+          failed: 0,
+          cached: true,
+          totalTools,
+          stacks: stacksToIndex.map((id) => ({
+            id,
+            tools: existingIndex.byStack[id]?.tools?.length || 0,
+            indexedAt: existingIndex.byStack[id]?.indexedAt
+          }))
+        }));
+      } else {
+        console.log(`Tool index is up to date (${totalTools} tools from ${stacksToIndex.length} stacks)`);
+        console.log(`Last updated: ${existingIndex.updatedAt}`);
+        console.log(`
+Use --force to re-index.`);
+      }
+      return;
+    }
+  }
+  if (!jsonOutput) {
+    console.log(`Indexing ${stacksToIndex.length} stack(s)...
+`);
+  }
+  const log = jsonOutput ? () => {
+  } : console.log;
+  try {
+    const result = await (0, import_core10.indexAllStacks)({
+      stacks: stacksToIndex,
+      log,
+      timeout: 2e4
+      // 20s per stack
+    });
+    const totalTools = Object.values(result.index.byStack).reduce(
+      (sum, entry) => sum + (entry.tools?.length || 0),
+      0
+    );
+    if (jsonOutput) {
+      console.log(JSON.stringify({
+        indexed: result.indexed,
+        failed: result.failed,
+        totalTools,
+        stacks: stacksToIndex.map((id) => ({
+          id,
+          tools: result.index.byStack[id]?.tools?.length || 0,
+          error: result.index.byStack[id]?.error || null,
+          missingSecrets: result.index.byStack[id]?.missingSecrets || null
+        }))
+      }, null, 2));
+    } else {
+      console.log(`
+${"\u2500".repeat(50)}`);
+      console.log(`Indexed: ${result.indexed}/${stacksToIndex.length} stacks`);
+      console.log(`Tools discovered: ${totalTools}`);
+      console.log(`Cache: ${import_core10.TOOL_INDEX_PATH}`);
+      if (result.failed > 0) {
+        console.log(`
+\u26A0 ${result.failed} stack(s) failed to index.`);
+        const missingSecretStacks = Object.entries(result.index.byStack).filter(([_, entry]) => entry.missingSecrets?.length > 0);
+        if (missingSecretStacks.length > 0) {
+          console.log(`
+Missing secrets:`);
+          for (const [stackId, entry] of missingSecretStacks) {
+            for (const secret of entry.missingSecrets) {
+              console.log(`  rudi secrets set ${secret}`);
+            }
+          }
+          console.log(`
+After configuring secrets, run: rudi index`);
+        }
+      }
+    }
+  } catch (error) {
+    if (jsonOutput) {
+      console.log(JSON.stringify({ error: error.message }));
+    } else {
+      console.error(`Index failed: ${error.message}`);
+    }
+    process.exit(1);
+  }
+}
+
 // src/index.js
 var VERSION = "2.0.0";
 async function main() {
@@ -3771,6 +3927,9 @@ async function main() {
         break;
       case "migrate":
         await cmdMigrate(args, flags);
+        break;
+      case "index":
+        await cmdIndex(args, flags);
         break;
       case "home":
       case "status":
