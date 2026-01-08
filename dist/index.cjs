@@ -188,18 +188,33 @@ async function installDependencies(stackPath, manifest) {
       });
       return { installed: true };
     } else if (runtime === "python") {
-      const requirementsPath = path.join(stackPath, "requirements.txt");
+      let requirementsPath = path.join(stackPath, "python", "requirements.txt");
+      let reqCwd = path.join(stackPath, "python");
       try {
         await fs.access(requirementsPath);
       } catch {
-        return { installed: false, reason: "No requirements.txt" };
+        requirementsPath = path.join(stackPath, "requirements.txt");
+        reqCwd = stackPath;
+        try {
+          await fs.access(requirementsPath);
+        } catch {
+          return { installed: false, reason: "No requirements.txt" };
+        }
       }
       const pipCmd = getBundledBinary("python", "pip");
       console.log(`  Installing pip dependencies...`);
-      (0, import_child_process.execSync)(`"${pipCmd}" install -r requirements.txt`, {
-        cwd: stackPath,
-        stdio: "pipe"
-      });
+      try {
+        (0, import_child_process.execSync)(`"${pipCmd}" install -r requirements.txt`, {
+          cwd: reqCwd,
+          stdio: "pipe"
+        });
+      } catch (pipError) {
+        const stderr = pipError.stderr?.toString() || "";
+        const stdout = pipError.stdout?.toString() || "";
+        const output = stderr || stdout || pipError.message;
+        return { installed: false, error: `pip install failed:
+${output}` };
+      }
       return { installed: true };
     }
     return { installed: false, reason: `Unknown runtime: ${runtime}` };
@@ -217,6 +232,30 @@ function getSecretName(secret) {
 function getSecretLink(secret) {
   if (typeof secret !== "object" || !secret) return null;
   return secret.link || secret.helpUrl || null;
+}
+function validateStackEntryPoint(stackPath, manifest) {
+  let command = manifest.command;
+  if (!command || command.length === 0) {
+    if (manifest.mcp?.command) {
+      const mcpCmd = manifest.mcp.command;
+      const mcpArgs = manifest.mcp.args || [];
+      command = [mcpCmd, ...mcpArgs];
+    }
+  }
+  if (!command || command.length === 0) {
+    return { valid: false, error: "No command defined in manifest" };
+  }
+  const runtimeCommands = ["node", "python", "python3", "npx", "deno", "bun"];
+  for (const arg of command) {
+    if (runtimeCommands.includes(arg)) continue;
+    if (arg.startsWith("-")) continue;
+    const entryPath = require("path").join(stackPath, arg);
+    if (!require("fs").existsSync(entryPath)) {
+      return { valid: false, error: `Entry point not found: ${arg}` };
+    }
+    return { valid: true };
+  }
+  return { valid: true };
 }
 async function checkSecrets(manifest) {
   const secrets = getManifestSecrets(manifest);
@@ -345,11 +384,24 @@ Installing...`);
       if (resolved.kind === "stack") {
         const manifest = await loadManifest(result.path);
         if (manifest) {
+          const validation = validateStackEntryPoint(result.path, manifest);
+          if (!validation.valid) {
+            console.error(`
+\u2717 Stack validation failed: ${validation.error}`);
+            console.error(`  The stack may be incomplete or misconfigured.`);
+            process.exit(1);
+          }
           const depResult = await installDependencies(result.path, manifest);
           if (depResult.installed) {
             console.log(`  \u2713 Dependencies installed`);
           } else if (depResult.error) {
-            console.log(`  \u26A0 Failed to install dependencies: ${depResult.error}`);
+            console.error(`
+\u2717 Failed to install dependencies:`);
+            console.error(`  ${depResult.error}`);
+            console.error(`
+  Stack installed but may not work. Fix dependencies and run:`);
+            console.error(`  rudi install ${result.id}`);
+            process.exit(1);
           }
           const { found, missing } = await checkSecrets(manifest);
           const envExampleKeys = await parseEnvExample(result.path);

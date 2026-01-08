@@ -116,10 +116,18 @@ async function installDependencies(stackPath, manifest) {
       // Use bundled pip if available
       const pipCmd = getBundledBinary('python', 'pip');
       console.log(`  Installing pip dependencies...`);
-      execSync(`"${pipCmd}" install -r requirements.txt`, {
-        cwd: reqCwd,
-        stdio: 'pipe',
-      });
+      try {
+        execSync(`"${pipCmd}" install -r requirements.txt`, {
+          cwd: reqCwd,
+          stdio: 'pipe',
+        });
+      } catch (pipError) {
+        // Show actual pip error output
+        const stderr = pipError.stderr?.toString() || '';
+        const stdout = pipError.stdout?.toString() || '';
+        const output = stderr || stdout || pipError.message;
+        return { installed: false, error: `pip install failed:\n${output}` };
+      }
       return { installed: true };
     }
 
@@ -151,6 +159,44 @@ function getSecretLink(secret) {
 function getSecretLabel(secret) {
   if (typeof secret !== 'object' || !secret) return null;
   return secret.label || secret.name || secret.key || null;
+}
+
+/**
+ * Validate that a stack's entry point exists
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateStackEntryPoint(stackPath, manifest) {
+  // Get command from manifest
+  let command = manifest.command;
+
+  if (!command || command.length === 0) {
+    // Try legacy mcp format
+    if (manifest.mcp?.command) {
+      const mcpCmd = manifest.mcp.command;
+      const mcpArgs = manifest.mcp.args || [];
+      command = [mcpCmd, ...mcpArgs];
+    }
+  }
+
+  if (!command || command.length === 0) {
+    return { valid: false, error: 'No command defined in manifest' };
+  }
+
+  // Find the entry point file (skip runtime command like python, node)
+  const runtimeCommands = ['node', 'python', 'python3', 'npx', 'deno', 'bun'];
+  for (const arg of command) {
+    if (runtimeCommands.includes(arg)) continue;
+    if (arg.startsWith('-')) continue; // skip flags
+
+    // This should be the entry point file
+    const entryPath = require('path').join(stackPath, arg);
+    if (!require('fs').existsSync(entryPath)) {
+      return { valid: false, error: `Entry point not found: ${arg}` };
+    }
+    return { valid: true };
+  }
+
+  return { valid: true }; // No file args found, assume command is valid
 }
 
 /**
@@ -308,16 +354,28 @@ export async function cmdInstall(args, flags) {
         }
       }
 
-      // For stacks: install dependencies, check secrets, show next steps
+      // For stacks: validate, install dependencies, check secrets, show next steps
       if (resolved.kind === 'stack') {
         const manifest = await loadManifest(result.path);
         if (manifest) {
+          // Validate entry point exists
+          const validation = validateStackEntryPoint(result.path, manifest);
+          if (!validation.valid) {
+            console.error(`\n✗ Stack validation failed: ${validation.error}`);
+            console.error(`  The stack may be incomplete or misconfigured.`);
+            process.exit(1);
+          }
+
           // Install runtime dependencies (npm install, pip install, etc.)
           const depResult = await installDependencies(result.path, manifest);
           if (depResult.installed) {
             console.log(`  ✓ Dependencies installed`);
           } else if (depResult.error) {
-            console.log(`  ⚠ Failed to install dependencies: ${depResult.error}`);
+            console.error(`\n✗ Failed to install dependencies:`);
+            console.error(`  ${depResult.error}`);
+            console.error(`\n  Stack installed but may not work. Fix dependencies and run:`);
+            console.error(`  rudi install ${result.id}`);
+            process.exit(1);
           }
 
           // Check secrets status
