@@ -245,10 +245,29 @@ function validateStackEntryPoint(stackPath, manifest) {
   if (!command || command.length === 0) {
     return { valid: false, error: "No command defined in manifest" };
   }
-  const runtimeCommands = ["node", "python", "python3", "npx", "deno", "bun"];
+  const skipCommands = [
+    "node",
+    "python",
+    "python3",
+    "npx",
+    "deno",
+    "bun",
+    "tsx",
+    "ts-node",
+    "tsm",
+    "esno",
+    "esbuild-register",
+    // TypeScript runners
+    "-y",
+    "--yes"
+    // npx flags
+  ];
+  const fileExtensions = [".js", ".ts", ".mjs", ".cjs", ".py", ".mts", ".cts"];
   for (const arg of command) {
-    if (runtimeCommands.includes(arg)) continue;
+    if (skipCommands.includes(arg)) continue;
     if (arg.startsWith("-")) continue;
+    const looksLikeFile = fileExtensions.some((ext) => arg.endsWith(ext)) || arg.includes("/");
+    if (!looksLikeFile) continue;
     const entryPath = require("path").join(stackPath, arg);
     if (!require("fs").existsSync(entryPath)) {
       return { valid: false, error: `Entry point not found: ${arg}` };

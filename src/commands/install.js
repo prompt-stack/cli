@@ -182,11 +182,23 @@ function validateStackEntryPoint(stackPath, manifest) {
     return { valid: false, error: 'No command defined in manifest' };
   }
 
-  // Find the entry point file (skip runtime command like python, node)
-  const runtimeCommands = ['node', 'python', 'python3', 'npx', 'deno', 'bun'];
+  // Skip these - they're runtime commands or npx runners, not files
+  const skipCommands = [
+    'node', 'python', 'python3', 'npx', 'deno', 'bun',
+    'tsx', 'ts-node', 'tsm', 'esno', 'esbuild-register', // TypeScript runners
+    '-y', '--yes', // npx flags
+  ];
+
+  // Find file entry points (paths with extensions or containing /)
+  const fileExtensions = ['.js', '.ts', '.mjs', '.cjs', '.py', '.mts', '.cts'];
+
   for (const arg of command) {
-    if (runtimeCommands.includes(arg)) continue;
+    if (skipCommands.includes(arg)) continue;
     if (arg.startsWith('-')) continue; // skip flags
+
+    // Check if this looks like a file path (has extension or contains /)
+    const looksLikeFile = fileExtensions.some(ext => arg.endsWith(ext)) || arg.includes('/');
+    if (!looksLikeFile) continue;
 
     // This should be the entry point file
     const entryPath = require('path').join(stackPath, arg);
