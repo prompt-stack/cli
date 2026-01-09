@@ -23,6 +23,7 @@
   "dependencies": {
     "@learnrudi/core": "workspace:*",
     "@learnrudi/db": "workspace:*",
+    "@learnrudi/embeddings": "workspace:*",
     "@learnrudi/env": "workspace:*",
     "@learnrudi/manifest": "workspace:*",
     "@learnrudi/mcp": "workspace:*",

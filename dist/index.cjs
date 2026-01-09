@@ -18175,6 +18175,7 @@ Total: ${totalCount} package(s) available`);
 
 // src/commands/install.js
 var fs13 = __toESM(require("fs/promises"), 1);
+var fsSync = __toESM(require("fs"), 1);
 var path13 = __toESM(require("path"), 1);
 var import_child_process4 = require("child_process");
 init_src3();
@@ -18654,13 +18655,13 @@ function getBundledBinary(runtime, binary) {
   const rudiHome = process.env.RUDI_HOME || path13.join(process.env.HOME || process.env.USERPROFILE, ".rudi");
   if (runtime === "node") {
     const npmPath = platform === "win32" ? path13.join(rudiHome, "runtimes", "node", "npm.cmd") : path13.join(rudiHome, "runtimes", "node", "bin", "npm");
-    if (require("fs").existsSync(npmPath)) {
+    if (fsSync.existsSync(npmPath)) {
       return npmPath;
     }
   }
   if (runtime === "python") {
     const pipPath = platform === "win32" ? path13.join(rudiHome, "runtimes", "python", "Scripts", "pip.exe") : path13.join(rudiHome, "runtimes", "python", "bin", "pip3");
-    if (require("fs").existsSync(pipPath)) {
+    if (fsSync.existsSync(pipPath)) {
       return pipPath;
     }
   }
@@ -18770,8 +18771,8 @@ function validateStackEntryPoint(stackPath, manifest) {
     if (arg.startsWith("-")) continue;
     const looksLikeFile = fileExtensions.some((ext) => arg.endsWith(ext)) || arg.includes("/");
     if (!looksLikeFile) continue;
-    const entryPath = require("path").join(stackPath, arg);
-    if (!require("fs").existsSync(entryPath)) {
+    const entryPath = path13.join(stackPath, arg);
+    if (!fsSync.existsSync(entryPath)) {
       return { valid: false, error: `Entry point not found: ${arg}` };
     }
     return { valid: true };

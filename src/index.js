@@ -32,6 +32,7 @@ import { cmdList } from './commands/list.js';
 import { cmdRemove } from './commands/remove.js';
 import { cmdSecrets } from './commands/secrets.js';
 import { cmdDb } from './commands/db.js';
+import { cmdSession } from './commands/session.js';
 import { cmdImport } from './commands/import.js';
 import { cmdDoctor } from './commands/doctor.js';
 import { cmdHome } from './commands/home.js';
@@ -101,6 +102,11 @@ async function main() {
       case 'db':
       case 'database':
         await cmdDb(args, flags);
+        break;
+
+      case 'session':
+      case 'sessions':
+        await cmdSession(args, flags);
         break;
 
       case 'import':
