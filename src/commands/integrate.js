@@ -92,7 +92,7 @@ function buildRouterEntry(agentId) {
 
 /**
  * Integrate RUDI router into a specific agent
- * Also cleans up old individual rudi-mcp entries
+ * Also cleans up old individual stack entries that should go through the router
  */
 async function integrateAgent(agentId, flags) {
   const agentConfig = AGENT_CONFIGS.find(a => a.id === agentId);
@@ -126,11 +126,40 @@ async function integrateAgent(agentId, flags) {
     config[key] = {};
   }
 
-  // Clean up old individual rudi-mcp entries
+  // Clean up entries that should go through the router:
+  // 1. Old rudi-mcp shim entries
+  // 2. Direct stack entries (cwd or args pointing to ~/.rudi/stacks/)
   const rudiMcpShimPath = path.join(PATHS.home, 'shims', 'rudi-mcp');
+  const rudiStacksPath = path.join(PATHS.home, 'stacks');
   const removedEntries = [];
+
   for (const [serverName, serverConfig] of Object.entries(config[key])) {
+    // Skip the router entry itself
+    if (serverName === 'rudi') continue;
+
+    let shouldRemove = false;
+
+    // Check for old rudi-mcp shim
     if (serverConfig.command === rudiMcpShimPath) {
+      shouldRemove = true;
+    }
+
+    // Check for direct stack entries (cwd points to ~/.rudi/stacks/)
+    if (serverConfig.cwd && serverConfig.cwd.startsWith(rudiStacksPath)) {
+      shouldRemove = true;
+    }
+
+    // Check for direct stack entries (args contain ~/.rudi/stacks/)
+    if (serverConfig.args && Array.isArray(serverConfig.args)) {
+      for (const arg of serverConfig.args) {
+        if (typeof arg === 'string' && arg.startsWith(rudiStacksPath)) {
+          shouldRemove = true;
+          break;
+        }
+      }
+    }
+
+    if (shouldRemove) {
       delete config[key][serverName];
       removedEntries.push(serverName);
     }

@@ -38263,9 +38263,26 @@ ${agentConfig.name}:`);
     config[key] = {};
   }
   const rudiMcpShimPath = path29.join(PATHS.home, "shims", "rudi-mcp");
+  const rudiStacksPath = path29.join(PATHS.home, "stacks");
   const removedEntries = [];
   for (const [serverName, serverConfig] of Object.entries(config[key])) {
+    if (serverName === "rudi") continue;
+    let shouldRemove = false;
     if (serverConfig.command === rudiMcpShimPath) {
+      shouldRemove = true;
+    }
+    if (serverConfig.cwd && serverConfig.cwd.startsWith(rudiStacksPath)) {
+      shouldRemove = true;
+    }
+    if (serverConfig.args && Array.isArray(serverConfig.args)) {
+      for (const arg of serverConfig.args) {
+        if (typeof arg === "string" && arg.startsWith(rudiStacksPath)) {
+          shouldRemove = true;
+          break;
+        }
+      }
+    }
+    if (shouldRemove) {
       delete config[key][serverName];
       removedEntries.push(serverName);
     }
