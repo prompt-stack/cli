@@ -34261,7 +34261,7 @@ var import_fs13 = __toESM(require("fs"), 1);
 init_src2();
 
 // packages/db/src/schema.js
-var SCHEMA_VERSION = 5;
+var SCHEMA_VERSION = 6;
 var SCHEMA_SQL = `
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -34282,6 +34282,7 @@ CREATE TABLE IF NOT EXISTS projects (
   cross_project_id TEXT,
   session_count INTEGER DEFAULT 0,
   total_cost REAL DEFAULT 0,
+  settings TEXT,
   created_at TEXT NOT NULL,
 
   UNIQUE(provider, name)
@@ -34303,15 +34304,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 
   -- Display
   title TEXT,
+  title_override TEXT,
   snippet TEXT,
 
   -- State
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived', 'deleted')),
   model TEXT,
+  system_prompt TEXT,
 
   -- Context
   cwd TEXT,
-  dir_scope TEXT DEFAULT 'project',
+  dir_scope TEXT DEFAULT 'project' CHECK (dir_scope IN ('project', 'home')),
   git_branch TEXT,
   native_storage_path TEXT,
 
@@ -34321,7 +34324,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   parent_session_id TEXT,
   agent_id TEXT,
   is_sidechain INTEGER DEFAULT 0,
-  session_type TEXT DEFAULT 'task',
+  session_type TEXT DEFAULT 'main',
+  slug TEXT,
   version TEXT,
   user_type TEXT DEFAULT 'external',
 
@@ -34344,8 +34348,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sessions_provider_session ON sessions(provider, provider_session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_provider_session_unique
+  ON sessions(provider, provider_session_id)
+  WHERE provider_session_id IS NOT NULL AND status != 'deleted';
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
+CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_type ON sessions(session_type);
 
 -- Turns (individual user->assistant exchanges)
 CREATE TABLE IF NOT EXISTS turns (
@@ -34353,6 +34362,7 @@ CREATE TABLE IF NOT EXISTS turns (
   session_id TEXT NOT NULL,
   provider TEXT NOT NULL,
   provider_session_id TEXT,
+  provider_turn_id TEXT,
 
   -- Sequence
   turn_number INTEGER NOT NULL,
@@ -34365,6 +34375,7 @@ CREATE TABLE IF NOT EXISTS turns (
   -- Config at time of turn
   model TEXT,
   permission_mode TEXT,
+  system_prompt TEXT,
 
   -- Metrics
   cost REAL,
@@ -34381,9 +34392,33 @@ CREATE TABLE IF NOT EXISTS turns (
 
   -- Rich metadata (JSON)
   tools_used TEXT,
+  tool_results TEXT,
+  todos TEXT,
+  thinking_config TEXT,
+  image_ids TEXT,
+  compact_metadata TEXT,
+
+  -- Turn linking
+  parent_turn_id TEXT,
+  uuid TEXT,
+  logical_parent_id TEXT,
+  leaf_uuid TEXT,
+
+  -- Message metadata
+  user_type TEXT,
+  is_meta INTEGER DEFAULT 0,
+  display_only INTEGER DEFAULT 0,
+
+  -- API metadata
+  service_tier TEXT,
+  api_request_id TEXT,
+
+  -- Event classification
+  kind TEXT DEFAULT 'message' CHECK (kind IN ('message', 'display', 'summary', 'tool', 'error')),
 
   -- Timestamps
   ts TEXT NOT NULL,
+  ts_ms INTEGER,
 
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
@@ -34392,6 +34427,9 @@ CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
 CREATE INDEX IF NOT EXISTS idx_turns_ts ON turns(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_turns_model ON turns(model);
 CREATE INDEX IF NOT EXISTS idx_turns_session_number ON turns(session_id, turn_number);
+CREATE INDEX IF NOT EXISTS idx_turns_session_ts_ms ON turns(session_id, ts_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_provider_dedup
+  ON turns(session_id, provider_turn_id) WHERE provider_turn_id IS NOT NULL;
 
 -- Full-text search on turns
 CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
@@ -34452,6 +34490,160 @@ CREATE TABLE IF NOT EXISTS model_pricing (
 
 CREATE INDEX IF NOT EXISTS idx_model_pricing_provider ON model_pricing(provider);
 CREATE INDEX IF NOT EXISTS idx_model_pricing_pattern ON model_pricing(model_pattern);
+
+-- =============================================================================
+-- FILE POSITIONS (session file tailing)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS file_positions (
+  file_path TEXT PRIMARY KEY,
+  byte_offset INTEGER NOT NULL DEFAULT 0,
+  file_size INTEGER NOT NULL DEFAULT 0,
+  mtime_ms INTEGER NOT NULL DEFAULT 0,
+  inode TEXT,
+  provider TEXT NOT NULL CHECK (provider IN ('claude', 'codex', 'gemini', 'ollama')),
+  last_synced_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_positions_provider ON file_positions(provider);
+
+-- =============================================================================
+-- FILE HISTORY (tracked files / revisions)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS tracked_files (
+  id TEXT PRIMARY KEY,
+  current_path TEXT NOT NULL,
+  risk_level TEXT DEFAULT 'low' CHECK (risk_level IN ('low', 'medium', 'high')),
+  created_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_files_path_active
+  ON tracked_files(current_path) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tracked_files_path ON tracked_files(current_path);
+CREATE INDEX IF NOT EXISTS idx_tracked_files_active ON tracked_files(deleted_at) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS file_revisions (
+  id TEXT PRIMARY KEY,
+  file_id TEXT NOT NULL,
+  revision_number INTEGER NOT NULL,
+  parent_revision_id TEXT,
+  content_hash TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('edit', 'revert', 'import', 'external', 'delete')),
+  author TEXT NOT NULL CHECK (author IN ('agent', 'user', 'external', 'system')),
+  summary TEXT,
+  is_binary INTEGER DEFAULT 0 CHECK (is_binary IN (0, 1)),
+  reverted_to_revision_id TEXT,
+  created_at TEXT NOT NULL,
+  path_at_revision TEXT NOT NULL,
+  FOREIGN KEY (file_id) REFERENCES tracked_files(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_revision_id) REFERENCES file_revisions(id),
+  FOREIGN KEY (reverted_to_revision_id) REFERENCES file_revisions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_revisions_file ON file_revisions(file_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_file_revisions_file_rev ON file_revisions(file_id, revision_number DESC);
+CREATE INDEX IF NOT EXISTS idx_file_revisions_hash ON file_revisions(content_hash);
+CREATE INDEX IF NOT EXISTS idx_file_revisions_path ON file_revisions(path_at_revision);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_file_revisions_number ON file_revisions(file_id, revision_number);
+
+-- =============================================================================
+-- FILE CHANGES / SYSTEM EVENTS
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS file_changes (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  turn_id TEXT,
+  file_path TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  content_before_hash TEXT,
+  content_after_hash TEXT,
+  diff_summary TEXT,
+  ts TEXT NOT NULL,
+  ts_ms INTEGER,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_changes_session ON file_changes(session_id);
+CREATE INDEX IF NOT EXISTS idx_file_changes_path ON file_changes(file_path);
+CREATE INDEX IF NOT EXISTS idx_file_changes_ts ON file_changes(ts_ms);
+
+CREATE TABLE IF NOT EXISTS system_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload TEXT,
+  ts TEXT NOT NULL,
+  ts_ms INTEGER,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_events_session ON system_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type);
+
+-- =============================================================================
+-- SESSION RUNTIME
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS session_runtime_state (
+  session_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK(status IN ('running','completed','error','stopped')),
+  provider TEXT,
+  provider_session_id TEXT,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  last_seq INTEGER NOT NULL DEFAULT 0,
+  cost_total REAL NOT NULL DEFAULT 0,
+  tokens_total INTEGER NOT NULL DEFAULT 0,
+  unseen_completion INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS session_runtime_events (
+  session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_runtime_events_session_ts
+  ON session_runtime_events(session_id, ts);
+
+-- =============================================================================
+-- OBSERVABILITY LOGS
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
+  type TEXT NOT NULL,
+  provider TEXT,
+  cid TEXT,
+  session_id TEXT,
+  terminal_id INTEGER,
+  feature TEXT,
+  step TEXT,
+  duration_ms INTEGER,
+  data_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source);
+CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
+CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type);
+CREATE INDEX IF NOT EXISTS idx_logs_provider ON logs(provider);
+CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_logs_duration ON logs(duration_ms) WHERE duration_ms IS NOT NULL;
 
 -- =============================================================================
 -- PACKAGES (stacks, prompts, runtimes, binaries, agents)
@@ -34568,16 +34760,15 @@ CREATE TABLE IF NOT EXISTS secrets_meta (
   last_used_at TEXT
 );
 `;
-function initSchema() {
-  const db3 = getDb();
+function initSchemaWithDb(db3) {
   const hasVersionTable = db3.prepare(`
     SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'
   `).get();
   if (!hasVersionTable) {
     console.log("Initializing database schema...");
     db3.exec(SCHEMA_SQL);
+    applySchemaUpdates(db3);
     db3.prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)").run(SCHEMA_VERSION, (/* @__PURE__ */ new Date()).toISOString());
-    seedModelPricing(db3);
     console.log(`Database initialized at schema version ${SCHEMA_VERSION}`);
     return { version: SCHEMA_VERSION, migrated: false };
   }
@@ -34586,7 +34777,379 @@ function initSchema() {
     runMigrations(db3, currentVersion, SCHEMA_VERSION);
     return { version: SCHEMA_VERSION, migrated: true, from: currentVersion };
   }
+  db3.exec(SCHEMA_SQL);
+  applySchemaUpdates(db3);
   return { version: currentVersion, migrated: false };
+}
+function initSchema() {
+  return initSchemaWithDb(getDb());
+}
+function applySchemaUpdates(db3) {
+  if (tableExists(db3, "projects")) {
+    ensureColumn(db3, "projects", "settings", "ALTER TABLE projects ADD COLUMN settings TEXT");
+  }
+  if (tableExists(db3, "sessions")) {
+    ensureColumn(db3, "sessions", "title_override", "ALTER TABLE sessions ADD COLUMN title_override TEXT");
+    ensureColumn(db3, "sessions", "system_prompt", "ALTER TABLE sessions ADD COLUMN system_prompt TEXT");
+    ensureColumn(
+      db3,
+      "sessions",
+      "dir_scope",
+      "ALTER TABLE sessions ADD COLUMN dir_scope TEXT DEFAULT 'project' CHECK (dir_scope IN ('project', 'home'))"
+    );
+    ensureColumn(
+      db3,
+      "sessions",
+      "inherit_project_prompt",
+      "ALTER TABLE sessions ADD COLUMN inherit_project_prompt INTEGER DEFAULT 1"
+    );
+    ensureColumn(db3, "sessions", "is_warmup", "ALTER TABLE sessions ADD COLUMN is_warmup INTEGER DEFAULT 0");
+    ensureColumn(db3, "sessions", "parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT");
+    ensureColumn(db3, "sessions", "agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT");
+    ensureColumn(db3, "sessions", "is_sidechain", "ALTER TABLE sessions ADD COLUMN is_sidechain INTEGER DEFAULT 0");
+    ensureColumn(
+      db3,
+      "sessions",
+      "session_type",
+      "ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'main'"
+    );
+    ensureColumn(db3, "sessions", "slug", "ALTER TABLE sessions ADD COLUMN slug TEXT");
+    ensureColumn(db3, "sessions", "version", "ALTER TABLE sessions ADD COLUMN version TEXT");
+    ensureColumn(
+      db3,
+      "sessions",
+      "user_type",
+      "ALTER TABLE sessions ADD COLUMN user_type TEXT DEFAULT 'external'"
+    );
+    if (columnExists(db3, "sessions", "session_type")) {
+      db3.exec("UPDATE sessions SET session_type = 'main' WHERE session_type = 'task'");
+    }
+    ensureIndex(db3, "idx_sessions_parent", "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)");
+    ensureIndex(db3, "idx_sessions_agent", "CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id)");
+    ensureIndex(db3, "idx_sessions_type", "CREATE INDEX IF NOT EXISTS idx_sessions_type ON sessions(session_type)");
+    if (!indexExists(db3, "idx_sessions_provider_session_unique")) {
+      dedupeProviderSessions(db3);
+      db3.exec("DROP INDEX IF EXISTS idx_sessions_provider_session");
+      db3.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_provider_session_unique
+          ON sessions(provider, provider_session_id)
+          WHERE provider_session_id IS NOT NULL AND status != 'deleted'
+      `);
+    }
+  }
+  if (tableExists(db3, "turns")) {
+    ensureColumn(db3, "turns", "provider_turn_id", "ALTER TABLE turns ADD COLUMN provider_turn_id TEXT");
+    ensureColumn(db3, "turns", "system_prompt", "ALTER TABLE turns ADD COLUMN system_prompt TEXT");
+    ensureColumn(db3, "turns", "parent_turn_id", "ALTER TABLE turns ADD COLUMN parent_turn_id TEXT");
+    ensureColumn(db3, "turns", "uuid", "ALTER TABLE turns ADD COLUMN uuid TEXT");
+    ensureColumn(db3, "turns", "service_tier", "ALTER TABLE turns ADD COLUMN service_tier TEXT");
+    ensureColumn(db3, "turns", "api_request_id", "ALTER TABLE turns ADD COLUMN api_request_id TEXT");
+    ensureColumn(db3, "turns", "tool_results", "ALTER TABLE turns ADD COLUMN tool_results TEXT");
+    ensureColumn(db3, "turns", "user_type", "ALTER TABLE turns ADD COLUMN user_type TEXT");
+    ensureColumn(db3, "turns", "is_meta", "ALTER TABLE turns ADD COLUMN is_meta INTEGER DEFAULT 0");
+    ensureColumn(db3, "turns", "display_only", "ALTER TABLE turns ADD COLUMN display_only INTEGER DEFAULT 0");
+    ensureColumn(db3, "turns", "todos", "ALTER TABLE turns ADD COLUMN todos TEXT");
+    ensureColumn(db3, "turns", "thinking_config", "ALTER TABLE turns ADD COLUMN thinking_config TEXT");
+    ensureColumn(db3, "turns", "image_ids", "ALTER TABLE turns ADD COLUMN image_ids TEXT");
+    ensureColumn(db3, "turns", "compact_metadata", "ALTER TABLE turns ADD COLUMN compact_metadata TEXT");
+    ensureColumn(db3, "turns", "logical_parent_id", "ALTER TABLE turns ADD COLUMN logical_parent_id TEXT");
+    ensureColumn(db3, "turns", "leaf_uuid", "ALTER TABLE turns ADD COLUMN leaf_uuid TEXT");
+    if (!columnExists(db3, "turns", "ts_ms")) {
+      db3.exec("ALTER TABLE turns ADD COLUMN ts_ms INTEGER");
+      db3.exec(`
+        UPDATE turns
+        SET ts_ms = CASE
+          WHEN ts GLOB '[0-9]*' AND LENGTH(ts) >= 13 THEN CAST(ts AS INTEGER)
+          WHEN ts LIKE '____-__-__T__:__:__*' THEN
+            CAST((julianday(SUBSTR(ts, 1, 19)) - julianday('1970-01-01')) * 86400000 AS INTEGER)
+          ELSE CAST((julianday(ts) - julianday('1970-01-01')) * 86400000 AS INTEGER)
+        END
+        WHERE ts_ms IS NULL AND ts IS NOT NULL
+      `);
+    }
+    if (columnExists(db3, "turns", "ts_ms")) {
+      ensureIndex(
+        db3,
+        "idx_turns_session_ts_ms",
+        "CREATE INDEX IF NOT EXISTS idx_turns_session_ts_ms ON turns(session_id, ts_ms)"
+      );
+    }
+    if (!columnExists(db3, "turns", "kind")) {
+      db3.exec("ALTER TABLE turns ADD COLUMN kind TEXT DEFAULT 'message' CHECK (kind IN ('message', 'display', 'summary', 'tool', 'error'))");
+      db3.exec(`
+        UPDATE turns SET kind = 'display'
+        WHERE user_message LIKE '[display: %]' AND assistant_response IS NULL
+      `);
+    }
+    if (columnExists(db3, "turns", "provider_turn_id")) {
+      ensureIndex(
+        db3,
+        "idx_turns_provider_dedup",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_provider_dedup ON turns(session_id, provider_turn_id) WHERE provider_turn_id IS NOT NULL"
+      );
+    }
+  }
+  ensureTable(db3, "file_positions", `
+    CREATE TABLE IF NOT EXISTS file_positions (
+      file_path TEXT PRIMARY KEY,
+      byte_offset INTEGER NOT NULL DEFAULT 0,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      mtime_ms INTEGER NOT NULL DEFAULT 0,
+      inode TEXT,
+      provider TEXT NOT NULL CHECK (provider IN ('claude', 'codex', 'gemini', 'ollama')),
+      last_synced_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_file_positions_provider",
+    "CREATE INDEX IF NOT EXISTS idx_file_positions_provider ON file_positions(provider)"
+  );
+  ensureTable(db3, "tracked_files", `
+    CREATE TABLE IF NOT EXISTS tracked_files (
+      id TEXT PRIMARY KEY,
+      current_path TEXT NOT NULL,
+      risk_level TEXT DEFAULT 'low' CHECK (risk_level IN ('low', 'medium', 'high')),
+      created_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_tracked_files_path_active",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_files_path_active ON tracked_files(current_path) WHERE deleted_at IS NULL"
+  );
+  ensureIndex(
+    db3,
+    "idx_tracked_files_path",
+    "CREATE INDEX IF NOT EXISTS idx_tracked_files_path ON tracked_files(current_path)"
+  );
+  ensureIndex(
+    db3,
+    "idx_tracked_files_active",
+    "CREATE INDEX IF NOT EXISTS idx_tracked_files_active ON tracked_files(deleted_at) WHERE deleted_at IS NULL"
+  );
+  ensureTable(db3, "file_revisions", `
+    CREATE TABLE IF NOT EXISTS file_revisions (
+      id TEXT PRIMARY KEY,
+      file_id TEXT NOT NULL,
+      revision_number INTEGER NOT NULL,
+      parent_revision_id TEXT,
+      content_hash TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('edit', 'revert', 'import', 'external', 'delete')),
+      author TEXT NOT NULL CHECK (author IN ('agent', 'user', 'external', 'system')),
+      summary TEXT,
+      is_binary INTEGER DEFAULT 0 CHECK (is_binary IN (0, 1)),
+      reverted_to_revision_id TEXT,
+      created_at TEXT NOT NULL,
+      path_at_revision TEXT NOT NULL,
+      FOREIGN KEY (file_id) REFERENCES tracked_files(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_revision_id) REFERENCES file_revisions(id),
+      FOREIGN KEY (reverted_to_revision_id) REFERENCES file_revisions(id)
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_file_revisions_file",
+    "CREATE INDEX IF NOT EXISTS idx_file_revisions_file ON file_revisions(file_id, created_at DESC)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_revisions_file_rev",
+    "CREATE INDEX IF NOT EXISTS idx_file_revisions_file_rev ON file_revisions(file_id, revision_number DESC)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_revisions_hash",
+    "CREATE INDEX IF NOT EXISTS idx_file_revisions_hash ON file_revisions(content_hash)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_revisions_path",
+    "CREATE INDEX IF NOT EXISTS idx_file_revisions_path ON file_revisions(path_at_revision)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_revisions_number",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_file_revisions_number ON file_revisions(file_id, revision_number)"
+  );
+  if (tableExists(db3, "file_revisions")) {
+    ensureColumn(
+      db3,
+      "file_revisions",
+      "is_binary",
+      "ALTER TABLE file_revisions ADD COLUMN is_binary INTEGER DEFAULT 0 CHECK (is_binary IN (0, 1))"
+    );
+  }
+  ensureTable(db3, "file_changes", `
+    CREATE TABLE IF NOT EXISTS file_changes (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      turn_id TEXT,
+      file_path TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      content_before_hash TEXT,
+      content_after_hash TEXT,
+      diff_summary TEXT,
+      ts TEXT NOT NULL,
+      ts_ms INTEGER,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_file_changes_session",
+    "CREATE INDEX IF NOT EXISTS idx_file_changes_session ON file_changes(session_id)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_changes_path",
+    "CREATE INDEX IF NOT EXISTS idx_file_changes_path ON file_changes(file_path)"
+  );
+  ensureIndex(
+    db3,
+    "idx_file_changes_ts",
+    "CREATE INDEX IF NOT EXISTS idx_file_changes_ts ON file_changes(ts_ms)"
+  );
+  ensureTable(db3, "system_events", `
+    CREATE TABLE IF NOT EXISTS system_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload TEXT,
+      ts TEXT NOT NULL,
+      ts_ms INTEGER,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_system_events_session",
+    "CREATE INDEX IF NOT EXISTS idx_system_events_session ON system_events(session_id)"
+  );
+  ensureIndex(
+    db3,
+    "idx_system_events_type",
+    "CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type)"
+  );
+  ensureTable(db3, "session_runtime_state", `
+    CREATE TABLE IF NOT EXISTS session_runtime_state (
+      session_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK(status IN ('running','completed','error','stopped')),
+      provider TEXT,
+      provider_session_id TEXT,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      cost_total REAL NOT NULL DEFAULT 0,
+      tokens_total INTEGER NOT NULL DEFAULT 0,
+      unseen_completion INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    )
+  `);
+  ensureTable(db3, "session_runtime_events", `
+    CREATE TABLE IF NOT EXISTS session_runtime_events (
+      session_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      PRIMARY KEY (session_id, seq)
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_session_runtime_events_session_ts",
+    "CREATE INDEX IF NOT EXISTS idx_session_runtime_events_session_ts ON session_runtime_events(session_id, ts)"
+  );
+  ensureTable(db3, "logs", `
+    CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      level TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
+      type TEXT NOT NULL,
+      provider TEXT,
+      cid TEXT,
+      session_id TEXT,
+      terminal_id INTEGER,
+      feature TEXT,
+      step TEXT,
+      duration_ms INTEGER,
+      data_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_logs_timestamp",
+    "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_source",
+    "CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_level",
+    "CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_type",
+    "CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_provider",
+    "CREATE INDEX IF NOT EXISTS idx_logs_provider ON logs(provider)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_session",
+    "CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id)"
+  );
+  ensureIndex(
+    db3,
+    "idx_logs_duration",
+    "CREATE INDEX IF NOT EXISTS idx_logs_duration ON logs(duration_ms) WHERE duration_ms IS NOT NULL"
+  );
+  ensureTable(db3, "model_pricing", `
+    CREATE TABLE IF NOT EXISTS model_pricing (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL CHECK (provider IN ('claude', 'codex', 'gemini', 'openai', 'ollama')),
+      model_pattern TEXT NOT NULL,
+      display_name TEXT,
+      input_cost_per_mtok REAL NOT NULL,
+      output_cost_per_mtok REAL NOT NULL,
+      cache_read_cost_per_mtok REAL DEFAULT 0,
+      cache_write_cost_per_mtok REAL DEFAULT 0,
+      effective_from TEXT NOT NULL,
+      effective_until TEXT,
+      notes TEXT,
+      UNIQUE(provider, model_pattern, effective_from)
+    );
+  `);
+  ensureIndex(
+    db3,
+    "idx_model_pricing_provider",
+    "CREATE INDEX IF NOT EXISTS idx_model_pricing_provider ON model_pricing(provider)"
+  );
+  ensureIndex(
+    db3,
+    "idx_model_pricing_pattern",
+    "CREATE INDEX IF NOT EXISTS idx_model_pricing_pattern ON model_pricing(model_pattern)"
+  );
+  if (tableExists(db3, "model_pricing")) {
+    const count = db3.prepare("SELECT COUNT(*) as count FROM model_pricing").get();
+    if (count && count.count === 0) {
+      seedModelPricing(db3);
+    }
+  }
 }
 function runMigrations(db3, from, to) {
   console.log(`Migrating database from v${from} to v${to}...`);
@@ -34751,17 +35314,64 @@ function runMigrations(db3, from, to) {
     },
     // Version 5: Add session metadata columns for Claude import
     5: (db4) => {
-      db4.exec(`
-        ALTER TABLE sessions ADD COLUMN dir_scope TEXT DEFAULT 'project';
-        ALTER TABLE sessions ADD COLUMN inherit_project_prompt INTEGER DEFAULT 1;
-        ALTER TABLE sessions ADD COLUMN is_warmup INTEGER DEFAULT 0;
-        ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
-        ALTER TABLE sessions ADD COLUMN agent_id TEXT;
-        ALTER TABLE sessions ADD COLUMN is_sidechain INTEGER DEFAULT 0;
-        ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'task';
-        ALTER TABLE sessions ADD COLUMN version TEXT;
-        ALTER TABLE sessions ADD COLUMN user_type TEXT DEFAULT 'external';
-      `);
+      ensureColumn(
+        db4,
+        "sessions",
+        "dir_scope",
+        "ALTER TABLE sessions ADD COLUMN dir_scope TEXT DEFAULT 'project' CHECK (dir_scope IN ('project', 'home'))"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "inherit_project_prompt",
+        "ALTER TABLE sessions ADD COLUMN inherit_project_prompt INTEGER DEFAULT 1"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "is_warmup",
+        "ALTER TABLE sessions ADD COLUMN is_warmup INTEGER DEFAULT 0"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "parent_session_id",
+        "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "agent_id",
+        "ALTER TABLE sessions ADD COLUMN agent_id TEXT"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "is_sidechain",
+        "ALTER TABLE sessions ADD COLUMN is_sidechain INTEGER DEFAULT 0"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "session_type",
+        "ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'main'"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "version",
+        "ALTER TABLE sessions ADD COLUMN version TEXT"
+      );
+      ensureColumn(
+        db4,
+        "sessions",
+        "user_type",
+        "ALTER TABLE sessions ADD COLUMN user_type TEXT DEFAULT 'external'"
+      );
+    },
+    // Version 6: Bring schema to Studio parity
+    6: (db4) => {
+      applySchemaUpdates(db4);
     }
   };
   for (let v2 = from + 1; v2 <= to; v2++) {
@@ -34779,6 +35389,72 @@ function runMigrations(db3, from, to) {
     }
   }
   console.log("Migrations complete.");
+}
+function tableExists(db3, table) {
+  const result = db3.prepare(`
+    SELECT name FROM sqlite_master WHERE type='table' AND name=?
+  `).get(table);
+  return !!result;
+}
+function columnExists(db3, table, column) {
+  try {
+    const columns = db3.pragma(`table_info(${table})`);
+    return columns.some((col) => col.name === column);
+  } catch {
+    return false;
+  }
+}
+function indexExists(db3, indexName) {
+  const result = db3.prepare(`
+    SELECT name FROM sqlite_master WHERE type='index' AND name=?
+  `).get(indexName);
+  return !!result;
+}
+function ensureColumn(db3, table, column, statement) {
+  if (!columnExists(db3, table, column)) {
+    db3.exec(statement);
+  }
+}
+function ensureIndex(db3, indexName, statement) {
+  if (!indexExists(db3, indexName)) {
+    db3.exec(statement);
+  }
+}
+function ensureTable(db3, table, statement) {
+  if (!tableExists(db3, table)) {
+    db3.exec(statement);
+  }
+}
+function dedupeProviderSessions(db3) {
+  const duplicates = db3.prepare(`
+    SELECT provider, provider_session_id, COUNT(*) as cnt
+    FROM sessions
+    WHERE provider_session_id IS NOT NULL
+    GROUP BY provider, provider_session_id
+    HAVING COUNT(*) > 1
+  `).all();
+  if (!duplicates.length) {
+    return;
+  }
+  for (const dup of duplicates) {
+    const sessions = db3.prepare(`
+      SELECT id, turn_count, created_at
+      FROM sessions
+      WHERE provider = ? AND provider_session_id = ?
+      ORDER BY turn_count DESC, created_at ASC
+    `).all(dup.provider, dup.provider_session_id);
+    const keepId = sessions[0].id;
+    const deleteIds = sessions.slice(1).map((s2) => s2.id);
+    for (const id of deleteIds) {
+      db3.prepare(`
+        UPDATE sessions
+        SET status = 'deleted',
+            deleted_at = datetime('now'),
+            provider_session_id = provider_session_id || '-dup-' || id
+        WHERE id = ?
+      `).run(id);
+    }
+  }
 }
 function seedModelPricing(db3) {
   const insert = db3.prepare(`
