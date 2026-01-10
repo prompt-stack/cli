@@ -1,6 +1,6 @@
-# Prompt Stack Packages
+# RUDI Packages
 
-Shared libraries and utilities for Prompt Stack. Used by both the CLI and Studio.
+Shared libraries and utilities for RUDI. Used by both the CLI and Studio.
 
 ## Monorepo Structure
 
@@ -186,15 +186,15 @@ Output / Artifact
 All packages throw typed errors:
 
 ```typescript
-export class PromptStackError extends Error {
+export class RUDIError extends Error {
   constructor(public code: string, message: string) {
     super(message)
   }
 }
 
-export class ManifestValidationError extends PromptStackError {}
-export class RuntimeNotFoundError extends PromptStackError {}
-export class SecretMissingError extends PromptStackError {}
+export class ManifestValidationError extends RUDIError {}
+export class RuntimeNotFoundError extends RUDIError {}
+export class SecretMissingError extends RUDIError {}
 ```
 
 ## Publishing

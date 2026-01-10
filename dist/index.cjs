@@ -1296,17 +1296,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path35) {
-      const ctrl = callVisitor(key, node, visitor, path35);
+    function visit_(key, node, visitor, path34) {
+      const ctrl = callVisitor(key, node, visitor, path34);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path35, ctrl);
-        return visit_(key, ctrl, visitor, path35);
+        replaceNode(key, path34, ctrl);
+        return visit_(key, ctrl, visitor, path34);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path35 = Object.freeze(path35.concat(node));
+          path34 = Object.freeze(path34.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = visit_(i2, node.items[i2], visitor, path35);
+            const ci = visit_(i2, node.items[i2], visitor, path34);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -1317,13 +1317,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path35 = Object.freeze(path35.concat(node));
-          const ck = visit_("key", node.key, visitor, path35);
+          path34 = Object.freeze(path34.concat(node));
+          const ck = visit_("key", node.key, visitor, path34);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path35);
+          const cv = visit_("value", node.value, visitor, path34);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -1344,17 +1344,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path35) {
-      const ctrl = await callVisitor(key, node, visitor, path35);
+    async function visitAsync_(key, node, visitor, path34) {
+      const ctrl = await callVisitor(key, node, visitor, path34);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path35, ctrl);
-        return visitAsync_(key, ctrl, visitor, path35);
+        replaceNode(key, path34, ctrl);
+        return visitAsync_(key, ctrl, visitor, path34);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path35 = Object.freeze(path35.concat(node));
+          path34 = Object.freeze(path34.concat(node));
           for (let i2 = 0; i2 < node.items.length; ++i2) {
-            const ci = await visitAsync_(i2, node.items[i2], visitor, path35);
+            const ci = await visitAsync_(i2, node.items[i2], visitor, path34);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -1365,13 +1365,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path35 = Object.freeze(path35.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path35);
+          path34 = Object.freeze(path34.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path34);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path35);
+          const cv = await visitAsync_("value", node.value, visitor, path34);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -1398,23 +1398,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path35) {
+    function callVisitor(key, node, visitor, path34) {
       if (typeof visitor === "function")
-        return visitor(key, node, path35);
+        return visitor(key, node, path34);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path35);
+        return visitor.Map?.(key, node, path34);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path35);
+        return visitor.Seq?.(key, node, path34);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path35);
+        return visitor.Pair?.(key, node, path34);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path35);
+        return visitor.Scalar?.(key, node, path34);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path35);
+        return visitor.Alias?.(key, node, path34);
       return void 0;
     }
-    function replaceNode(key, path35, node) {
-      const parent = path35[path35.length - 1];
+    function replaceNode(key, path34, node) {
+      const parent = path34[path34.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -2022,10 +2022,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path35, value) {
+    function collectionFromPath(schema, path34, value) {
       let v2 = value;
-      for (let i2 = path35.length - 1; i2 >= 0; --i2) {
-        const k2 = path35[i2];
+      for (let i2 = path34.length - 1; i2 >= 0; --i2) {
+        const k2 = path34[i2];
         if (typeof k2 === "number" && Number.isInteger(k2) && k2 >= 0) {
           const a2 = [];
           a2[k2] = v2;
@@ -2044,7 +2044,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path35) => path35 == null || typeof path35 === "object" && !!path35[Symbol.iterator]().next().done;
+    var isEmptyPath = (path34) => path34 == null || typeof path34 === "object" && !!path34[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -2074,11 +2074,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path35, value) {
-        if (isEmptyPath(path35))
+      addIn(path34, value) {
+        if (isEmptyPath(path34))
           this.add(value);
         else {
-          const [key, ...rest] = path35;
+          const [key, ...rest] = path34;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -2092,8 +2092,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path35) {
-        const [key, ...rest] = path35;
+      deleteIn(path34) {
+        const [key, ...rest] = path34;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -2107,8 +2107,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path35, keepScalar) {
-        const [key, ...rest] = path35;
+      getIn(path34, keepScalar) {
+        const [key, ...rest] = path34;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -2126,8 +2126,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path35) {
-        const [key, ...rest] = path35;
+      hasIn(path34) {
+        const [key, ...rest] = path34;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -2137,8 +2137,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path35, value) {
-        const [key, ...rest] = path35;
+      setIn(path34, value) {
+        const [key, ...rest] = path34;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -4642,9 +4642,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path35, value) {
+      addIn(path34, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path35, value);
+          this.contents.addIn(path34, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -4719,14 +4719,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path35) {
-        if (Collection.isEmptyPath(path35)) {
+      deleteIn(path34) {
+        if (Collection.isEmptyPath(path34)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path35) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path34) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -4741,10 +4741,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path35, keepScalar) {
-        if (Collection.isEmptyPath(path35))
+      getIn(path34, keepScalar) {
+        if (Collection.isEmptyPath(path34))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path35, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path34, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -4755,10 +4755,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path35) {
-        if (Collection.isEmptyPath(path35))
+      hasIn(path34) {
+        if (Collection.isEmptyPath(path34))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path35) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path34) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -4775,13 +4775,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path35, value) {
-        if (Collection.isEmptyPath(path35)) {
+      setIn(path34, value) {
+        if (Collection.isEmptyPath(path34)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path35), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path34), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path35, value);
+          this.contents.setIn(path34, value);
         }
       }
       /**
@@ -6733,9 +6733,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path35) => {
+    visit.itemAtPath = (cst, path34) => {
       let item = cst;
-      for (const [field, index] of path35) {
+      for (const [field, index] of path34) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -6744,23 +6744,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path35) => {
-      const parent = visit.itemAtPath(cst, path35.slice(0, -1));
-      const field = path35[path35.length - 1][0];
+    visit.parentCollection = (cst, path34) => {
+      const parent = visit.itemAtPath(cst, path34.slice(0, -1));
+      const field = path34[path34.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path35, item, visitor) {
-      let ctrl = visitor(item, path35);
+    function _visit(path34, item, visitor) {
+      let ctrl = visitor(item, path34);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i2 = 0; i2 < token.items.length; ++i2) {
-            const ci = _visit(Object.freeze(path35.concat([[field, i2]])), token.items[i2], visitor);
+            const ci = _visit(Object.freeze(path34.concat([[field, i2]])), token.items[i2], visitor);
             if (typeof ci === "number")
               i2 = ci - 1;
             else if (ci === BREAK)
@@ -6771,10 +6771,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path35);
+            ctrl = ctrl(item, path34);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path35) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path34) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -8059,14 +8059,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs35 = this.flowScalar(this.type);
+              const fs34 = this.flowScalar(this.type);
               if (atNextItem || it2.value) {
-                map.items.push({ start, key: fs35, sep: [] });
+                map.items.push({ start, key: fs34, sep: [] });
                 this.onKeyLine = true;
               } else if (it2.sep) {
-                this.stack.push(fs35);
+                this.stack.push(fs34);
               } else {
-                Object.assign(it2, { key: fs35, sep: [] });
+                Object.assign(it2, { key: fs34, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -8194,13 +8194,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs35 = this.flowScalar(this.type);
+              const fs34 = this.flowScalar(this.type);
               if (!it2 || it2.value)
-                fc.items.push({ start: [], key: fs35, sep: [] });
+                fc.items.push({ start: [], key: fs34, sep: [] });
               else if (it2.sep)
-                this.stack.push(fs35);
+                this.stack.push(fs34);
               else
-                Object.assign(it2, { key: fs35, sep: [] });
+                Object.assign(it2, { key: fs34, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -13605,8 +13605,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path35) {
-      let input = path35;
+    function removeDotSegments(path34) {
+      let input = path34;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -13805,8 +13805,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path35, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path35 && path35 !== "/" ? path35 : void 0;
+        const [path34, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path34 && path34 !== "/" ? path34 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -17159,12 +17159,12 @@ var require_dist2 = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats2(ajv2, list, fs35, exportName) {
+    function addFormats2(ajv2, list, fs34, exportName) {
       var _a2;
       var _b;
       (_a2 = (_b = ajv2.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv2.addFormat(f2, fs35[f2]);
+        ajv2.addFormat(f2, fs34[f2]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -18864,14 +18864,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path35 = url.path;
-      if (path35.length === 0) {
+      const path34 = url.path;
+      if (path34.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path35.length === 1 && isNormalizedWindowsDriveLetter(path35[0])) {
+      if (url.scheme === "file" && path34.length === 1 && isNormalizedWindowsDriveLetter(path34[0])) {
         return;
       }
-      path35.pop();
+      path34.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -24855,14 +24855,14 @@ __export(fileFromPath_exports, {
   fileFromPathSync: () => fileFromPathSync,
   isFile: () => isFile
 });
-function createFileFromPath(path35, { mtimeMs, size }, filenameOrOptions, options = {}) {
+function createFileFromPath(path34, { mtimeMs, size }, filenameOrOptions, options = {}) {
   let filename;
   if (isPlainObject_default2(filenameOrOptions)) {
     [options, filename] = [filenameOrOptions, void 0];
   } else {
     filename = filenameOrOptions;
   }
-  const file = new FileFromPath({ path: path35, size, lastModified: mtimeMs });
+  const file = new FileFromPath({ path: path34, size, lastModified: mtimeMs });
   if (!filename) {
     filename = file.name;
   }
@@ -24871,13 +24871,13 @@ function createFileFromPath(path35, { mtimeMs, size }, filenameOrOptions, option
     lastModified: file.lastModified
   });
 }
-function fileFromPathSync(path35, filenameOrOptions, options = {}) {
-  const stats = (0, import_fs16.statSync)(path35);
-  return createFileFromPath(path35, stats, filenameOrOptions, options);
+function fileFromPathSync(path34, filenameOrOptions, options = {}) {
+  const stats = (0, import_fs16.statSync)(path34);
+  return createFileFromPath(path34, stats, filenameOrOptions, options);
 }
-async function fileFromPath2(path35, filenameOrOptions, options) {
-  const stats = await import_fs16.promises.stat(path35);
-  return createFileFromPath(path35, stats, filenameOrOptions, options);
+async function fileFromPath2(path34, filenameOrOptions, options) {
+  const stats = await import_fs16.promises.stat(path34);
+  return createFileFromPath(path34, stats, filenameOrOptions, options);
 }
 var import_fs16, import_path17, import_node_domexception, __classPrivateFieldSet4, __classPrivateFieldGet5, _FileFromPath_path, _FileFromPath_start, MESSAGE, FileFromPath;
 var init_fileFromPath = __esm({
@@ -24938,13 +24938,13 @@ var init_fileFromPath = __esm({
 });
 
 // node_modules/.pnpm/openai@4.104.0/node_modules/openai/_shims/node-runtime.mjs
-async function fileFromPath3(path35, ...args) {
+async function fileFromPath3(path34, ...args) {
   const { fileFromPath: _fileFromPath } = await Promise.resolve().then(() => (init_fileFromPath(), fileFromPath_exports));
   if (!fileFromPathWarned) {
-    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path35)}) instead`);
+    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path34)}) instead`);
     fileFromPathWarned = true;
   }
-  return await _fileFromPath(path35, ...args);
+  return await _fileFromPath(path34, ...args);
 }
 async function getMultipartRequestOptions2(form, opts) {
   const encoder = new FormDataEncoder(form);
@@ -25877,29 +25877,29 @@ var init_core = __esm({
       defaultIdempotencyKey() {
         return `stainless-node-retry-${uuid4()}`;
       }
-      get(path35, opts) {
-        return this.methodRequest("get", path35, opts);
+      get(path34, opts) {
+        return this.methodRequest("get", path34, opts);
       }
-      post(path35, opts) {
-        return this.methodRequest("post", path35, opts);
+      post(path34, opts) {
+        return this.methodRequest("post", path34, opts);
       }
-      patch(path35, opts) {
-        return this.methodRequest("patch", path35, opts);
+      patch(path34, opts) {
+        return this.methodRequest("patch", path34, opts);
       }
-      put(path35, opts) {
-        return this.methodRequest("put", path35, opts);
+      put(path34, opts) {
+        return this.methodRequest("put", path34, opts);
       }
-      delete(path35, opts) {
-        return this.methodRequest("delete", path35, opts);
+      delete(path34, opts) {
+        return this.methodRequest("delete", path34, opts);
       }
-      methodRequest(method, path35, opts) {
+      methodRequest(method, path34, opts) {
         return this.request(Promise.resolve(opts).then(async (opts2) => {
           const body = opts2 && isBlobLike(opts2?.body) ? new DataView(await opts2.body.arrayBuffer()) : opts2?.body instanceof DataView ? opts2.body : opts2?.body instanceof ArrayBuffer ? new DataView(opts2.body) : opts2 && ArrayBuffer.isView(opts2?.body) ? new DataView(opts2.body.buffer) : opts2?.body;
-          return { method, path: path35, ...opts2, body };
+          return { method, path: path34, ...opts2, body };
         }));
       }
-      getAPIList(path35, Page2, opts) {
-        return this.requestAPIList(Page2, { method: "get", path: path35, ...opts });
+      getAPIList(path34, Page2, opts) {
+        return this.requestAPIList(Page2, { method: "get", path: path34, ...opts });
       }
       calculateContentLength(body) {
         if (typeof body === "string") {
@@ -25918,10 +25918,10 @@ var init_core = __esm({
       }
       buildRequest(inputOptions, { retryCount = 0 } = {}) {
         const options = { ...inputOptions };
-        const { method, path: path35, query, headers = {} } = options;
+        const { method, path: path34, query, headers = {} } = options;
         const body = ArrayBuffer.isView(options.body) || options.__binaryRequest && typeof options.body === "string" ? options.body : isMultipartBody(options.body) ? options.body.body : options.body ? JSON.stringify(options.body, null, 2) : null;
         const contentLength = this.calculateContentLength(body);
-        const url = this.buildURL(path35, query);
+        const url = this.buildURL(path34, query);
         if ("timeout" in options)
           validatePositiveInteger("timeout", options.timeout);
         options.timeout = options.timeout ?? this.timeout;
@@ -26037,8 +26037,8 @@ var init_core = __esm({
         const request = this.makeRequest(options, null);
         return new PagePromise(this, request, Page2);
       }
-      buildURL(path35, query) {
-        const url = isAbsoluteURL(path35) ? new URL(path35) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path35.startsWith("/") ? path35.slice(1) : path35));
+      buildURL(path34, query) {
+        const url = isAbsoluteURL(path34) ? new URL(path34) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path34.startsWith("/") ? path34.slice(1) : path34));
         const defaultQuery = this.defaultQuery();
         if (!isEmptyObj(defaultQuery)) {
           query = { ...defaultQuery, ...query };
@@ -33271,11 +33271,11 @@ async function runStack(id, options = {}) {
   const startTime = Date.now();
   const packagePath = getPackagePath2(id);
   const manifestPath = import_path11.default.join(packagePath, "manifest.json");
-  const { default: fs35 } = await import("fs");
-  if (!fs35.existsSync(manifestPath)) {
+  const { default: fs34 } = await import("fs");
+  if (!fs34.existsSync(manifestPath)) {
     throw new Error(`Stack manifest not found: ${id}`);
   }
-  const manifest = JSON.parse(fs35.readFileSync(manifestPath, "utf-8"));
+  const manifest = JSON.parse(fs34.readFileSync(manifestPath, "utf-8"));
   const { command, args } = resolveCommandFromManifest(manifest, packagePath);
   const secrets = await getSecrets(manifest.requires?.secrets || []);
   const runEnv = {
@@ -36014,9 +36014,9 @@ async function sessionExport(args, flags) {
   };
   const json = JSON.stringify(exportData, null, 2);
   if (flags.output || flags.o) {
-    const fs35 = await import("fs");
+    const fs34 = await import("fs");
     const outputFile = flags.output || flags.o;
-    fs35.writeFileSync(outputFile, json);
+    fs34.writeFileSync(outputFile, json);
     console.log(`\u2713 Exported session to: ${outputFile}`);
   } else {
     console.log(json);
@@ -36406,8 +36406,7 @@ Analyzing ${sessions.length} sessions...
   const projectSuggestions = [];
   const moveSuggestions = [];
   const knownProjects = {
-    "studio": "Prompt Stack Studio",
-    "prompt-stack": "Prompt Stack Studio",
+    "studio": "RUDI Studio",
     "RUDI": "RUDI",
     "rudi": "RUDI",
     "cli": "RUDI",
@@ -36495,8 +36494,8 @@ Proposed actions:`);
       console.log(`  ... and ${titleSuggestions.length - 5} more`);
     }
   }
-  const { writeFileSync: writeFileSync7 } = await import("fs");
-  writeFileSync7(outputFile, JSON.stringify(plan, null, 2));
+  const { writeFileSync: writeFileSync6 } = await import("fs");
+  writeFileSync6(outputFile, JSON.stringify(plan, null, 2));
   console.log(`
 \u2713 Plan saved to: ${outputFile}`);
   console.log("\nTo apply this plan:");
@@ -38446,281 +38445,6 @@ Wiring up RUDI router...`);
   console.log("  rudi index             # Rebuild tool cache");
 }
 
-// src/commands/migrate.js
-var fs30 = __toESM(require("fs"), 1);
-var path30 = __toESM(require("path"), 1);
-var import_os7 = __toESM(require("os"), 1);
-init_src();
-var HOME3 = import_os7.default.homedir();
-var OLD_PROMPT_STACK = path30.join(HOME3, ".prompt-stack");
-var SHIM_PATH = path30.join(PATHS.home, "shims", "rudi-mcp");
-function getOldStacks() {
-  const stacksDir = path30.join(OLD_PROMPT_STACK, "stacks");
-  if (!fs30.existsSync(stacksDir)) return [];
-  return fs30.readdirSync(stacksDir, { withFileTypes: true }).filter((d2) => d2.isDirectory() && !d2.name.startsWith(".")).filter((d2) => {
-    const hasManifest = fs30.existsSync(path30.join(stacksDir, d2.name, "manifest.json"));
-    const hasPackage = fs30.existsSync(path30.join(stacksDir, d2.name, "package.json"));
-    return hasManifest || hasPackage;
-  }).map((d2) => d2.name);
-}
-function copyStack(stackName) {
-  const oldPath = path30.join(OLD_PROMPT_STACK, "stacks", stackName);
-  const newPath = path30.join(PATHS.stacks, stackName);
-  if (!fs30.existsSync(oldPath)) {
-    return { success: false, error: "Source not found" };
-  }
-  if (fs30.existsSync(newPath)) {
-    return { success: true, skipped: true, reason: "Already exists" };
-  }
-  if (!fs30.existsSync(PATHS.stacks)) {
-    fs30.mkdirSync(PATHS.stacks, { recursive: true });
-  }
-  copyRecursive(oldPath, newPath);
-  return { success: true, copied: true };
-}
-function copyRecursive(src, dest) {
-  const stat = fs30.statSync(src);
-  if (stat.isDirectory()) {
-    fs30.mkdirSync(dest, { recursive: true });
-    for (const child of fs30.readdirSync(src)) {
-      copyRecursive(path30.join(src, child), path30.join(dest, child));
-    }
-  } else {
-    fs30.copyFileSync(src, dest);
-  }
-}
-function ensureShim() {
-  const shimsDir = path30.dirname(SHIM_PATH);
-  if (!fs30.existsSync(shimsDir)) {
-    fs30.mkdirSync(shimsDir, { recursive: true });
-  }
-  const shimContent = `#!/usr/bin/env bash
-set -euo pipefail
-if command -v rudi &> /dev/null; then
-  exec rudi mcp "$1"
-else
-  exec npx --yes @learnrudi/cli mcp "$1"
-fi
-`;
-  fs30.writeFileSync(SHIM_PATH, shimContent, { mode: 493 });
-}
-function buildNewEntry(stackName, agentId) {
-  const base = {
-    command: SHIM_PATH,
-    args: [stackName]
-  };
-  if (agentId === "claude-desktop" || agentId === "claude-code") {
-    return { type: "stdio", ...base };
-  }
-  return base;
-}
-function isOldEntry(entry) {
-  if (!entry) return false;
-  const command = entry.command || "";
-  const args = entry.args || [];
-  const cwd = entry.cwd || "";
-  return command.includes(".prompt-stack") || args.some((a2) => typeof a2 === "string" && a2.includes(".prompt-stack")) || cwd.includes(".prompt-stack");
-}
-function migrateAgentConfig(agentConfig, installedStacks, flags) {
-  const configPath = findAgentConfig(agentConfig);
-  if (!configPath) return { skipped: true, reason: "Config not found" };
-  let config;
-  try {
-    config = JSON.parse(fs30.readFileSync(configPath, "utf-8"));
-  } catch {
-    return { skipped: true, reason: "Could not parse config" };
-  }
-  const key = agentConfig.key;
-  const mcpServers = config[key] || {};
-  let updated = 0;
-  let removed = 0;
-  const changes = [];
-  for (const [name, entry] of Object.entries(mcpServers)) {
-    if (isOldEntry(entry)) {
-      if (installedStacks.includes(name)) {
-        const newEntry = buildNewEntry(name, agentConfig.id);
-        mcpServers[name] = newEntry;
-        updated++;
-        changes.push({ name, action: "updated" });
-      } else if (flags.removeOrphans) {
-        delete mcpServers[name];
-        removed++;
-        changes.push({ name, action: "removed (not installed)" });
-      } else {
-        changes.push({ name, action: "skipped (not installed in .rudi)" });
-      }
-    }
-  }
-  if (updated > 0 || removed > 0) {
-    const backupPath = configPath + ".backup." + Date.now();
-    fs30.copyFileSync(configPath, backupPath);
-    config[key] = mcpServers;
-    fs30.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  }
-  return { updated, removed, changes };
-}
-async function cmdMigrate(args, flags) {
-  const subcommand = args[0];
-  if (!subcommand || subcommand === "help") {
-    console.log(`
-rudi migrate - Migrate from .prompt-stack to .rudi
-
-USAGE
-  rudi migrate status         Show what needs to be migrated
-  rudi migrate stacks         Copy stacks from .prompt-stack to .rudi
-  rudi migrate configs        Update agent configs to use new shim
-  rudi migrate all            Do everything
-
-OPTIONS
-  --remove-orphans    Remove entries for stacks not installed in .rudi
-  --dry-run           Show what would be done without making changes
-`);
-    return;
-  }
-  if (subcommand === "status") {
-    await migrateStatus();
-    return;
-  }
-  if (subcommand === "stacks") {
-    await migrateStacks(flags);
-    return;
-  }
-  if (subcommand === "configs") {
-    await migrateConfigs(flags);
-    return;
-  }
-  if (subcommand === "all") {
-    await migrateStacks(flags);
-    console.log("");
-    await migrateConfigs(flags);
-    return;
-  }
-  console.error(`Unknown subcommand: ${subcommand}`);
-  console.error("Run: rudi migrate help");
-}
-async function migrateStatus() {
-  console.log("\n=== Migration Status ===\n");
-  const oldStacks = getOldStacks();
-  console.log(`Old .prompt-stack stacks: ${oldStacks.length}`);
-  if (oldStacks.length > 0) {
-    for (const name of oldStacks) {
-      const existsInRudi = fs30.existsSync(path30.join(PATHS.stacks, name));
-      const status = existsInRudi ? "\u2713 (already in .rudi)" : "\u25CB (needs migration)";
-      console.log(`  ${status} ${name}`);
-    }
-  }
-  const newStacksDir = PATHS.stacks;
-  let newStacks = [];
-  if (fs30.existsSync(newStacksDir)) {
-    newStacks = fs30.readdirSync(newStacksDir, { withFileTypes: true }).filter((d2) => d2.isDirectory() && !d2.name.startsWith(".")).map((d2) => d2.name);
-  }
-  console.log(`
-New .rudi stacks: ${newStacks.length}`);
-  if (newStacks.length > 0) {
-    for (const name of newStacks) {
-      console.log(`  \u2713 ${name}`);
-    }
-  }
-  console.log("\n=== Agent Configs ===\n");
-  for (const agentConfig of AGENT_CONFIGS) {
-    const configPath = findAgentConfig(agentConfig);
-    if (!configPath) continue;
-    let config;
-    try {
-      config = JSON.parse(fs30.readFileSync(configPath, "utf-8"));
-    } catch {
-      continue;
-    }
-    const mcpServers = config[agentConfig.key] || {};
-    const entries = Object.entries(mcpServers);
-    const oldEntries = entries.filter(([_2, e2]) => isOldEntry(e2));
-    const newEntries = entries.filter(([_2, e2]) => !isOldEntry(e2));
-    if (entries.length === 0) continue;
-    console.log(`${agentConfig.name}:`);
-    console.log(`  Config: ${configPath}`);
-    console.log(`  Old entries: ${oldEntries.length}`);
-    console.log(`  New entries: ${newEntries.length}`);
-    if (oldEntries.length > 0) {
-      console.log("  Needs update:");
-      for (const [name] of oldEntries) {
-        const installed = newStacks.includes(name);
-        const status = installed ? "(ready)" : "(not in .rudi)";
-        console.log(`    - ${name} ${status}`);
-      }
-    }
-    console.log("");
-  }
-  console.log("Run: rudi migrate all");
-}
-async function migrateStacks(flags) {
-  console.log("=== Migrating Stacks ===\n");
-  const oldStacks = getOldStacks();
-  if (oldStacks.length === 0) {
-    console.log("No stacks found in .prompt-stack");
-    return;
-  }
-  console.log(`Found ${oldStacks.length} stack(s) in .prompt-stack
-`);
-  for (const name of oldStacks) {
-    if (flags.dryRun) {
-      const exists = fs30.existsSync(path30.join(PATHS.stacks, name));
-      console.log(`  [dry-run] ${name}: ${exists ? "would skip (exists)" : "would copy"}`);
-    } else {
-      const result = copyStack(name);
-      if (result.skipped) {
-        console.log(`  \u25CB ${name}: skipped (${result.reason})`);
-      } else if (result.copied) {
-        console.log(`  \u2713 ${name}: copied to .rudi/stacks/`);
-      } else {
-        console.log(`  \u2717 ${name}: ${result.error}`);
-      }
-    }
-  }
-  if (!flags.dryRun) {
-    console.log(`
-Stacks migrated to: ${PATHS.stacks}`);
-  }
-}
-async function migrateConfigs(flags) {
-  console.log("=== Updating Agent Configs ===\n");
-  if (!flags.dryRun) {
-    ensureShim();
-    console.log(`Shim ready: ${SHIM_PATH}
-`);
-  }
-  let installedStacks = [];
-  if (fs30.existsSync(PATHS.stacks)) {
-    installedStacks = fs30.readdirSync(PATHS.stacks, { withFileTypes: true }).filter((d2) => d2.isDirectory() && !d2.name.startsWith(".")).map((d2) => d2.name);
-  }
-  for (const agentConfig of AGENT_CONFIGS) {
-    const configPath = findAgentConfig(agentConfig);
-    if (!configPath) continue;
-    if (flags.dryRun) {
-      console.log(`${agentConfig.name}:`);
-      console.log(`  [dry-run] Would update entries using .prompt-stack paths`);
-      continue;
-    }
-    const result = migrateAgentConfig(agentConfig, installedStacks, flags);
-    if (result.skipped) {
-      continue;
-    }
-    console.log(`${agentConfig.name}:`);
-    console.log(`  Config: ${configPath}`);
-    if (result.changes && result.changes.length > 0) {
-      for (const change of result.changes) {
-        console.log(`    ${change.action}: ${change.name}`);
-      }
-    }
-    if (result.updated > 0 || result.removed > 0) {
-      console.log(`  Updated: ${result.updated}, Removed: ${result.removed}`);
-    } else {
-      console.log(`  No changes needed`);
-    }
-    console.log("");
-  }
-  console.log("Restart your agents to use the updated configs.");
-}
-
 // src/commands/index-tools.js
 init_src4();
 init_src4();
@@ -38860,7 +38584,7 @@ init_src4();
 var import_child_process11 = require("child_process");
 var import_fs24 = __toESM(require("fs"), 1);
 var import_path22 = __toESM(require("path"), 1);
-var import_os8 = __toESM(require("os"), 1);
+var import_os7 = __toESM(require("os"), 1);
 var AGENTS = [
   {
     id: "claude",
@@ -38905,7 +38629,7 @@ var BINARIES = [
   { id: "jq", name: "jq", command: "jq", versionFlag: "--version" }
 ];
 function fileExists(filePath) {
-  const resolved = filePath.replace("~", import_os8.default.homedir());
+  const resolved = filePath.replace("~", import_os7.default.homedir());
   return import_fs24.default.existsSync(resolved);
 }
 function checkKeychain(service) {
@@ -39156,7 +38880,7 @@ init_src4();
 var import_child_process12 = require("child_process");
 var import_fs25 = __toESM(require("fs"), 1);
 var import_path23 = __toESM(require("path"), 1);
-var import_os9 = __toESM(require("os"), 1);
+var import_os8 = __toESM(require("os"), 1);
 var AGENT_CREDENTIALS = {
   claude: { type: "keychain", service: "Claude Code-credentials" },
   codex: { type: "file", path: "~/.codex/auth.json" },
@@ -39164,7 +38888,7 @@ var AGENT_CREDENTIALS = {
   copilot: { type: "file", path: "~/.config/github-copilot/hosts.json" }
 };
 function fileExists2(filePath) {
-  const resolved = filePath.replace("~", import_os9.default.homedir());
+  const resolved = filePath.replace("~", import_os8.default.homedir());
   return import_fs25.default.existsSync(resolved);
 }
 function checkKeychain2(service) {
@@ -39673,7 +39397,7 @@ Lockfile: ${lockPath}`);
 // src/commands/apply.js
 var import_fs28 = require("fs");
 var import_path26 = require("path");
-var import_os10 = require("os");
+var import_os9 = require("os");
 var import_crypto3 = require("crypto");
 async function cmdApply(args, flags) {
   const planFile = args[0];
@@ -39856,10 +39580,10 @@ Applying plan ${planId}...
     }
     console.log(`  \u2713 Updated ${updated} titles`);
   }
-  const undoDir = (0, import_path26.join)((0, import_os10.homedir)(), ".rudi", "plans");
-  const { mkdirSync: mkdirSync5 } = await import("fs");
+  const undoDir = (0, import_path26.join)((0, import_os9.homedir)(), ".rudi", "plans");
+  const { mkdirSync: mkdirSync4 } = await import("fs");
   try {
-    mkdirSync5(undoDir, { recursive: true });
+    mkdirSync4(undoDir, { recursive: true });
   } catch (e2) {
   }
   const undoFile = (0, import_path26.join)(undoDir, `${planId}.undo.json`);
@@ -40122,9 +39846,6 @@ async function main() {
         break;
       case "integrate":
         await cmdIntegrate(args, flags);
-        break;
-      case "migrate":
-        await cmdMigrate(args, flags);
         break;
       case "index":
         await cmdIndex(args, flags);

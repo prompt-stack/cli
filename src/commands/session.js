@@ -1025,8 +1025,7 @@ async function sessionOrganize(flags) {
 
   // Known project mappings
   const knownProjects = {
-    'studio': 'Prompt Stack Studio',
-    'prompt-stack': 'Prompt Stack Studio',
+    'studio': 'RUDI Studio',
     'RUDI': 'RUDI',
     'rudi': 'RUDI',
     'cli': 'RUDI',
