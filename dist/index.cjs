@@ -40670,7 +40670,7 @@ async function cmdStudio(args, flags) {
 }
 
 // src/index.js
-var VERSION2 = "2.0.0";
+var VERSION2 = true ? "1.10.8" : process.env.npm_package_version || "0.0.0";
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));
   if (flags.version || flags.v) {

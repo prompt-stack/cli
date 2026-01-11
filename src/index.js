@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * RUDI CLI v2.0.0 - RUDI Command Line Interface
+ * RUDI CLI - RUDI Command Line Interface
  *
  * Commands:
  *   rudi home                Show ~/.rudi structure and status
@@ -56,7 +56,9 @@ import { cmdApply } from './commands/apply.js';
 import { cmdProject } from './commands/project.js';
 import { cmdStudio } from './commands/studio.js';
 
-const VERSION = '2.0.0';
+const VERSION = typeof __RUDI_CLI_VERSION__ === 'string'
+  ? __RUDI_CLI_VERSION__
+  : (process.env.npm_package_version || '0.0.0');
 
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));
