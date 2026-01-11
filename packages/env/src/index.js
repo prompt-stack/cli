@@ -96,6 +96,56 @@ export function getStoreDir() {
   return PATHS.store;
 }
 
+/**
+ * Get the Node runtime root (global npm prefix for RUDI-managed agents)
+ * @returns {string}
+ */
+export function getNodeRuntimeRoot() {
+  return path.join(PATHS.runtimes, 'node');
+}
+
+/**
+ * Resolve a binary inside the RUDI-managed Node runtime
+ * Prefer arch-specific layout, fall back to flat layout
+ * @param {string} binName
+ * @returns {string}
+ */
+export function resolveNodeRuntimeBin(binName) {
+  const root = getNodeRuntimeRoot();
+  const isWindows = os.platform() === 'win32';
+  const arch = os.arch() === 'arm64' ? 'arm64' : 'x64';
+  const binDir = isWindows ? 'Scripts' : 'bin';
+  const candidates = [];
+
+  if (isWindows) {
+    const names = [`${binName}.cmd`, `${binName}.exe`, binName];
+    for (const name of names) {
+      candidates.push(path.join(root, arch, binDir, name));
+      candidates.push(path.join(root, binDir, name));
+    }
+  } else {
+    candidates.push(path.join(root, arch, binDir, binName));
+    candidates.push(path.join(root, binDir, binName));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Default to flat layout if nothing exists yet
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * Get the Node runtime bin directory
+ * @returns {string}
+ */
+export function getNodeRuntimeBinDir() {
+  return path.dirname(resolveNodeRuntimeBin('node'));
+}
+
 // =============================================================================
 // PLATFORM DETECTION
 // =============================================================================
@@ -310,11 +360,25 @@ export function isPackageInstalled(id) {
     return false;
   }
 
-  // For agents (npm packages), check if node_modules/.bin exists
-  // An empty folder means a failed/incomplete install
+  // For agents (npm packages), check global npm bin in the Node runtime
   if (kind === 'agent') {
-    const binPath = path.join(packagePath, 'node_modules', '.bin', name);
-    return fs.existsSync(binPath);
+    const manifestPath = path.join(packagePath, 'manifest.json');
+    let bins = [];
+
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        bins = manifest.bins || manifest.binaries || [];
+      } catch {
+        bins = [];
+      }
+    }
+
+    if (bins.length === 0) {
+      bins = [name];
+    }
+
+    return bins.some(bin => fs.existsSync(resolveNodeRuntimeBin(bin)));
   }
 
   // For other package types, just check folder is non-empty

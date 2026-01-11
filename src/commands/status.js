@@ -11,7 +11,7 @@
  *   rudi status runtimes  Status of runtimes only
  */
 
-import { PATHS, getInstalledPackages, isPackageInstalled } from '@learnrudi/core';
+import { PATHS, getInstalledPackages, isPackageInstalled, resolveNodeRuntimeBin } from '@learnrudi/core';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -107,6 +107,29 @@ function getVersion(command, versionFlag) {
   }
 }
 
+function getAgentBins(agentId) {
+  const manifestPath = path.join(PATHS.agents, agentId, 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const bins = manifest.bins || manifest.binaries || [];
+      if (bins.length > 0) return bins;
+    } catch {
+      // Fall through to default
+    }
+  }
+  return [agentId];
+}
+
+function findRudiAgentBin(agentId) {
+  const bins = getAgentBins(agentId);
+  for (const bin of bins) {
+    const binPath = resolveNodeRuntimeBin(bin);
+    if (fs.existsSync(binPath)) return binPath;
+  }
+  return null;
+}
+
 /**
  * Check if binary exists in PATH or RUDI locations
  */
@@ -115,6 +138,7 @@ function findBinary(command, kind = 'binary') {
   const rudiPaths = [
     path.join(PATHS.agents, command, 'node_modules', '.bin', command),
     path.join(PATHS.runtimes, command, 'bin', command),
+    resolveNodeRuntimeBin(command),
     path.join(PATHS.binaries, command, command),
     path.join(PATHS.binaries, command),
   ];
@@ -144,12 +168,12 @@ function findBinary(command, kind = 'binary') {
 
 /**
  * Get agent status
- * Checks both RUDI location (~/.rudi/agents/) and global PATH
+ * Checks RUDI-managed global install (~/.rudi/runtimes/node/bin) and global PATH
  */
 function getAgentStatus(agent) {
-  // Check RUDI location first (preferred)
-  const rudiPath = path.join(PATHS.agents, agent.id, 'node_modules', '.bin', agent.id);
-  const rudiInstalled = fs.existsSync(rudiPath);
+  // Check RUDI global location first (preferred)
+  const rudiPath = findRudiAgentBin(agent.id);
+  const rudiInstalled = !!rudiPath;
 
   // Check global PATH as fallback
   let globalPath = null;

@@ -8,22 +8,42 @@ import path from 'path';
 import { pipeline } from 'stream/promises';
 import { createWriteStream } from 'fs';
 import { createGunzip } from 'zlib';
-import { PATHS, getPackagePath, ensureDirectories, parsePackageId } from '@learnrudi/env';
+import {
+  PATHS,
+  getPackagePath,
+  ensureDirectories,
+  parsePackageId,
+  getNodeRuntimeRoot,
+  getNodeRuntimeBinDir,
+  resolveNodeRuntimeBin
+} from '@learnrudi/env';
 import { downloadRuntime, downloadPackage, downloadTool } from '@learnrudi/registry-client';
 import { resolvePackage, getInstallOrder } from './resolver.js';
 import { writeLockfile } from './lockfile.js';
 import { createShimsForTool, removeShims } from './shims.js';
 
+function getNpmModulesRoot(installRoot, scope = 'local') {
+  if (scope === 'global') {
+    return path.join(installRoot, 'lib', 'node_modules');
+  }
+  return path.join(installRoot, 'node_modules');
+}
+
+function getNpmPackageJsonPath(installRoot, packageName, scope = 'local') {
+  return path.join(getNpmModulesRoot(installRoot, scope), packageName, 'package.json');
+}
+
 /**
  * Auto-discover binaries from installed npm package
  * Reads package.json bin field after npm install completes
- * @param {string} installPath - Installation directory
+ * @param {string} installRoot - Installation directory or npm prefix
  * @param {string} packageName - npm package name
+ * @param {'local' | 'global'} [scope]
  * @returns {string[]} Array of discovered bin names
  */
-function discoverNpmBins(installPath, packageName) {
+function discoverNpmBins(installRoot, packageName, scope = 'local') {
   try {
-    const pkgJsonPath = path.join(installPath, 'node_modules', packageName, 'package.json');
+    const pkgJsonPath = getNpmPackageJsonPath(installRoot, packageName, scope);
 
     if (!fs.existsSync(pkgJsonPath)) {
       console.warn(`[Installer] Warning: Could not find package.json at ${pkgJsonPath}`);
@@ -57,9 +77,9 @@ function discoverNpmBins(installPath, packageName) {
  * @param {string} packageName - npm package name
  * @returns {boolean} True if package has install scripts
  */
-function hasInstallScripts(installPath, packageName) {
+function hasInstallScripts(installRoot, packageName, scope = 'local') {
   try {
-    const pkgJsonPath = path.join(installPath, 'node_modules', packageName, 'package.json');
+    const pkgJsonPath = getNpmPackageJsonPath(installRoot, packageName, scope);
 
     if (!fs.existsSync(pkgJsonPath)) {
       return false;
@@ -158,25 +178,52 @@ export async function installPackage(id, options = {}) {
 async function installSinglePackage(pkg, options = {}) {
   const { force = false, allowScripts = false, onProgress } = options;
   const installPath = getPackagePath(pkg.id);
+  const pkgName = pkg.id.replace(/^(runtime|binary|agent):/, '');
+  const isAgentNpm = pkg.kind === 'agent' && pkg.npmPackage;
 
   // Check if already installed
   if (fs.existsSync(installPath) && !force) {
-    return { success: true, id: pkg.id, path: installPath, skipped: true };
+    if (!isAgentNpm) {
+      return { success: true, id: pkg.id, path: installPath, skipped: true };
+    }
+
+    // For npm-based agents, only skip if the global bin exists
+    const manifestPath = path.join(installPath, 'manifest.json');
+    let bins = pkg.bins || [];
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        bins = manifest.bins || manifest.binaries || bins;
+      } catch {
+        // Use fallback bins
+      }
+    }
+    if (bins.length === 0) {
+      bins = [pkgName];
+    }
+
+    const hasGlobalBin = bins.some(bin => fs.existsSync(resolveNodeRuntimeBin(bin)));
+    if (hasGlobalBin) {
+      return { success: true, id: pkg.id, path: installPath, skipped: true };
+    }
   }
 
   // Handle runtimes, binaries, agents - download from GitHub releases or install via npm
   if (pkg.kind === 'runtime' || pkg.kind === 'binary' || pkg.kind === 'agent') {
-    const pkgName = pkg.id.replace(/^(runtime|binary|agent):/, '');
-
     onProgress?.({ phase: 'downloading', package: pkg.id });
 
     // Handle npm-based packages (agents, cloud CLIs)
     if (pkg.npmPackage) {
       try {
         const { execSync } = await import('child_process');
+        const npmInstallRoot = isAgentNpm ? getNodeRuntimeRoot() : installPath;
+        const npmScope = isAgentNpm ? 'global' : 'local';
 
         if (!fs.existsSync(installPath)) {
           fs.mkdirSync(installPath, { recursive: true });
+        }
+        if (isAgentNpm && !fs.existsSync(npmInstallRoot)) {
+          fs.mkdirSync(npmInstallRoot, { recursive: true });
         }
 
         onProgress?.({ phase: 'installing', package: pkg.id, message: `npm install ${pkg.npmPackage}` });
@@ -186,10 +233,10 @@ async function installSinglePackage(pkg, options = {}) {
         const resourcesPath = process.env.RESOURCES_PATH;
         const npmCmd = resourcesPath
           ? path.join(resourcesPath, 'bundled-runtimes', 'node', 'bin', 'npm')
-          : 'npm';
+          : await findNpmExecutable();
 
-        // Initialize package.json if needed
-        if (!fs.existsSync(path.join(installPath, 'package.json'))) {
+        // Initialize package.json if needed (local installs only)
+        if (!isAgentNpm && !fs.existsSync(path.join(installPath, 'package.json'))) {
           execSync(`"${npmCmd}" init -y`, { cwd: installPath, stdio: 'pipe' });
         }
 
@@ -201,19 +248,22 @@ async function installSinglePackage(pkg, options = {}) {
           ? '--ignore-scripts --no-audit --no-fund'  // Dynamic npm: safer default
           : '--no-audit --no-fund';  // Curated or --allow-scripts: run scripts
 
-        execSync(`"${npmCmd}" install ${pkg.npmPackage} ${installFlags}`, { cwd: installPath, stdio: 'pipe' });
+        const installCmd = isAgentNpm
+          ? `install -g ${pkg.npmPackage} ${installFlags} --prefix "${npmInstallRoot}"`
+          : `install ${pkg.npmPackage} ${installFlags}`;
+        execSync(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: 'pipe' });
 
         // Auto-discover bins if not specified (dynamic npm installs)
         let bins = pkg.bins;
         if (!bins || bins.length === 0) {
-          bins = discoverNpmBins(installPath, pkg.npmPackage);
+          bins = discoverNpmBins(npmInstallRoot, pkg.npmPackage, npmScope);
           console.log(`[Installer] Discovered binaries: ${bins.join(', ') || '(none)'}`);
         }
 
         // Get actual installed version
         let installedVersion = pkg.version || 'latest';
         try {
-          const pkgJsonPath = path.join(installPath, 'node_modules', pkg.npmPackage, 'package.json');
+          const pkgJsonPath = getNpmPackageJsonPath(npmInstallRoot, pkg.npmPackage, npmScope);
           if (fs.existsSync(pkgJsonPath)) {
             const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
             installedVersion = pkgJson.version;
@@ -225,16 +275,26 @@ async function installSinglePackage(pkg, options = {}) {
         // Run postInstall if specified
         if (pkg.postInstall) {
           onProgress?.({ phase: 'postInstall', package: pkg.id, message: pkg.postInstall });
-          // Replace 'npx <cmd>' with direct node_modules/.bin/<cmd> path for reliability
+          const binDir = isAgentNpm
+            ? getNodeRuntimeBinDir()
+            : path.join(installPath, 'node_modules', '.bin');
+          // Replace 'npx <cmd>' with direct bin path for reliability
           const postInstallCmd = pkg.postInstall.replace(
             /^npx\s+(\S+)/,
-            `"${path.join(installPath, 'node_modules', '.bin', '$1')}"`
+            `"${path.join(binDir, '$1')}"`
           );
-          execSync(postInstallCmd, { cwd: installPath, stdio: 'pipe' });
+          execSync(postInstallCmd, {
+            cwd: installPath,
+            stdio: 'pipe',
+            env: {
+              ...process.env,
+              PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`
+            }
+          });
         }
 
         // Check if package has install scripts
-        const scriptsDetected = hasInstallScripts(installPath, pkg.npmPackage);
+        const scriptsDetected = hasInstallScripts(npmInstallRoot, pkg.npmPackage, npmScope);
         const scriptsPolicy = installFlags.includes('--ignore-scripts') ? 'ignore' : 'allow';
 
         // Warn if scripts were skipped
@@ -255,6 +315,8 @@ async function installSinglePackage(pkg, options = {}) {
           hasInstallScripts: scriptsDetected,
           scriptsPolicy: scriptsPolicy,
           postInstall: pkg.postInstall,
+          installType: isAgentNpm ? 'npm-global' : 'npm',
+          npmPrefix: isAgentNpm ? npmInstallRoot : undefined,
           installedAt: new Date().toISOString(),
           source: pkg.source || { type: 'npm' }
         };
@@ -268,13 +330,21 @@ async function installSinglePackage(pkg, options = {}) {
         if (bins && bins.length > 0) {
           await createShimsForTool({
             id: pkg.id,
-            installType: 'npm',
-            installDir: installPath,
+            installType: isAgentNpm ? 'npm-global' : 'npm',
+            installDir: npmInstallRoot,
             bins: bins,
             name: pkgName
           });
         } else {
           console.warn(`[Installer] Warning: No binaries found for ${pkg.npmPackage}`);
+        }
+
+        // Remove legacy local node_modules for agents (global canonical install)
+        if (isAgentNpm) {
+          const legacyPath = path.join(installPath, 'node_modules');
+          if (fs.existsSync(legacyPath)) {
+            fs.rmSync(legacyPath, { recursive: true, force: true });
+          }
         }
 
         return { success: true, id: pkg.id, path: installPath };
@@ -472,16 +542,31 @@ export async function uninstallPackage(id) {
   try {
     // Read manifest to get bins list for shim cleanup
     let bins = [];
+    let manifest = null;
     if (kind !== 'prompt') {
       const manifestPath = path.join(installPath, 'manifest.json');
       if (fs.existsSync(manifestPath)) {
         try {
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+          manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
           bins = manifest.bins || manifest.binaries || [];
         } catch {
           // Fallback: use package name as bin
           bins = [name];
         }
+      }
+    }
+
+    // Uninstall global npm package for agents
+    if (kind === 'agent' && manifest?.npmPackage) {
+      try {
+        const { execSync } = await import('child_process');
+        const npmCmd = await findNpmExecutable();
+        const npmPrefix = getNodeRuntimeRoot();
+        execSync(`"${npmCmd}" uninstall -g ${manifest.npmPackage} --prefix "${npmPrefix}" --no-audit --no-fund`, {
+          stdio: 'pipe'
+        });
+      } catch (error) {
+        console.warn(`[Installer] Warning: Failed to uninstall ${manifest.npmPackage}: ${error.message}`);
       }
     }
 

@@ -14,7 +14,10 @@ export {
   getInstalledPackages,
   ensureDirectories,
   parsePackageId,
-  createPackageId
+  createPackageId,
+  getNodeRuntimeRoot,
+  getNodeRuntimeBinDir,
+  resolveNodeRuntimeBin
 } from '@learnrudi/env';
 
 // Re-export from registry-client for convenience

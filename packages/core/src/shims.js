@@ -17,7 +17,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { PATHS } from '@learnrudi/env';
+import { PATHS, resolveNodeRuntimeBin } from '@learnrudi/env';
 
 /**
  * @typedef {Object} ShimOwnership
@@ -127,7 +127,7 @@ export function getAllShimOwners() {
  * Create shims for an installed tool
  * @param {Object} manifest - Installed tool manifest
  * @param {string} manifest.id - Package ID
- * @param {string} manifest.installType - Type: 'binary', 'npm', 'pip', 'system'
+ * @param {string} manifest.installType - Type: 'binary', 'npm', 'npm-global', 'pip', 'system'
  * @param {string} manifest.installDir - Installation directory
  * @param {string[]} manifest.bins - Executable names
  * @param {Object} [manifest.source] - Source info (for system type)
@@ -184,6 +184,10 @@ function resolveBinTarget(manifest, bin) {
     case 'npm':
       // npm package: in node_modules/.bin/
       return path.join(manifest.installDir, 'node_modules', '.bin', bin);
+
+    case 'npm-global':
+      // npm global (RUDI-managed Node runtime)
+      return resolveNodeRuntimeBin(bin);
 
     case 'pip':
       // pip package: in venv/bin/

@@ -88,18 +88,6 @@ function getShimTarget(name, shimPath, type) {
 function getPackageFromShim(shimName, target) {
   if (!target) return null;
 
-  // Extract from target path: ~/.rudi/binaries/uv/uv -> binary:uv
-  const match = target.match(/\/(binaries|runtimes|agents)\/([^\/]+)/);
-  if (match) {
-    const [, kind, pkgName] = match;
-    const kindMap = {
-      'binaries': 'binary',
-      'runtimes': 'runtime',
-      'agents': 'agent'
-    };
-    return `${kindMap[kind]}:${pkgName}`;
-  }
-
   // Check manifest files to find which package provides this shim
   const manifestDirs = [
     path.join(PATHS.binaries),
@@ -127,6 +115,18 @@ function getPackageFromShim(shimName, target) {
         }
       }
     }
+  }
+
+  // Extract from target path: ~/.rudi/binaries/uv/uv -> binary:uv
+  const match = target.match(/\/(binaries|runtimes|agents)\/([^\/]+)/);
+  if (match) {
+    const [, kind, pkgName] = match;
+    const kindMap = {
+      'binaries': 'binary',
+      'runtimes': 'runtime',
+      'agents': 'agent'
+    };
+    return `${kindMap[kind]}:${pkgName}`;
   }
 
   return null;

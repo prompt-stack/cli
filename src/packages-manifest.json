@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "generated": "2026-01-11T15:40:59.295Z",
+  "generated": "2026-01-11T19:37:25.870Z",
   "packages": {
     "runtimes": [
       {
@@ -122,13 +122,13 @@
         "id": "claude",
         "name": "Claude Code",
         "kind": "agent",
-        "installDir": "claude",
-        "basePath": "agents",
-        "installType": "npm",
+        "installDir": "node",
+        "basePath": "runtimes",
+        "installType": "npm-global",
         "commands": [
           {
             "name": "claude",
-            "bin": "node_modules/.bin/claude",
+            "bin": "bin/claude",
             "args": null
           }
         ]
@@ -137,13 +137,13 @@
         "id": "codex",
         "name": "OpenAI Codex",
         "kind": "agent",
-        "installDir": "codex",
-        "basePath": "agents",
-        "installType": "npm",
+        "installDir": "node",
+        "basePath": "runtimes",
+        "installType": "npm-global",
         "commands": [
           {
             "name": "codex",
-            "bin": "node_modules/.bin/codex",
+            "bin": "bin/codex",
             "args": null
           }
         ]
@@ -152,18 +152,18 @@
         "id": "copilot",
         "name": "GitHub Copilot",
         "kind": "agent",
-        "installDir": "copilot",
-        "basePath": "agents",
-        "installType": "npm",
+        "installDir": "node",
+        "basePath": "runtimes",
+        "installType": "npm-global",
         "commands": [
           {
             "name": "copilot",
-            "bin": "node_modules/.bin/github-copilot-cli",
+            "bin": "bin/github-copilot-cli",
             "args": null
           },
           {
             "name": "github-copilot-cli",
-            "bin": "node_modules/.bin/github-copilot-cli",
+            "bin": "bin/github-copilot-cli",
             "args": null
           }
         ]
@@ -172,13 +172,13 @@
         "id": "gemini",
         "name": "Gemini CLI",
         "kind": "agent",
-        "installDir": "gemini",
-        "basePath": "agents",
-        "installType": "npm",
+        "installDir": "node",
+        "basePath": "runtimes",
+        "installType": "npm-global",
         "commands": [
           {
             "name": "gemini",
-            "bin": "node_modules/.bin/gemini",
+            "bin": "bin/gemini",
             "args": null
           }
         ]

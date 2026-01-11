@@ -5,7 +5,7 @@
  * Fetches runtime manifests from registry and downloads:
  * 1. Node.js runtime → ~/.rudi/runtimes/node/
  * 2. Python runtime → ~/.rudi/runtimes/python/
- * 3. Creates shims → ~/.rudi/shims/
+ * 3. Creates shims → ~/.rudi/bins/
  * 4. Initializes rudi.json → ~/.rudi/rudi.json
  */
 
@@ -287,6 +287,37 @@ function loadPackagesManifest() {
   return { packages: { runtimes: [], agents: [], binaries: [] } };
 }
 
+function resolveNodeRuntimeBinDir() {
+  const isWindows = process.platform === 'win32';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const binDir = isWindows ? 'Scripts' : 'bin';
+  const nodeRoot = path.join(RUDI_HOME, 'runtimes', 'node');
+  const archBin = path.join(nodeRoot, arch, binDir);
+  const flatBin = path.join(nodeRoot, binDir);
+  const nodeExe = isWindows ? 'node.exe' : 'node';
+
+  if (fs.existsSync(path.join(archBin, nodeExe))) {
+    return archBin;
+  }
+
+  return flatBin;
+}
+
+function getCliEntryPath() {
+  const candidates = [
+    path.join(path.dirname(process.argv[1]), '..', 'dist', 'index.cjs'),
+    path.join(path.dirname(process.argv[1]), '..', 'src', 'index.js'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Build a shim script that executes a target binary
  * Shows helpful error if binary not installed
@@ -338,6 +369,7 @@ function createShims() {
 
   const manifest = loadPackagesManifest();
   const shimDefs = [];
+  const nodeBinDir = resolveNodeRuntimeBinDir();
 
   // ---------------------------------------------------------------------------
   // GENERATE SHIMS FROM MANIFEST (only for installed packages)
@@ -350,7 +382,10 @@ function createShims() {
   ];
 
   for (const pkg of allPackages) {
-    const installPath = path.join(RUDI_HOME, pkg.basePath, pkg.installDir);
+    const isAgentNpm = pkg.kind === 'agent' && (pkg.installType === 'npm' || pkg.installType === 'npm-global');
+    const installPath = isAgentNpm
+      ? path.join(RUDI_HOME, 'runtimes', 'node')
+      : path.join(RUDI_HOME, pkg.basePath, pkg.installDir);
 
     // Only create shims for packages that are actually installed
     // Check if the install directory exists
@@ -359,7 +394,10 @@ function createShims() {
     }
 
     for (const cmd of pkg.commands) {
-      const binPath = path.join(installPath, cmd.bin);
+      const binName = isAgentNpm ? path.basename(cmd.bin) : cmd.bin;
+      const binPath = isAgentNpm
+        ? path.join(nodeBinDir, binName)
+        : path.join(installPath, cmd.bin);
 
       // Only create shim if the target binary exists
       if (!fs.existsSync(binPath)) {
@@ -386,6 +424,26 @@ function createShims() {
   // RUDI SHIMS (router, mcp) - always included
   // ---------------------------------------------------------------------------
 
+  const cliEntryPath = getCliEntryPath();
+  if (cliEntryPath) {
+    const nodeBin = path.join(nodeBinDir, isWindows ? 'node.exe' : 'node');
+    shimDefs.push({
+      name: 'rudi',
+      script: `#!/bin/sh
+CLI_ENTRY="${cliEntryPath.replace(/"/g, '\\"')}"
+NODE_BIN="${nodeBin.replace(/"/g, '\\"')}"
+if [ -x "$CLI_ENTRY" ]; then
+  if [ -x "$NODE_BIN" ]; then
+    exec "$NODE_BIN" "$CLI_ENTRY" "$@"
+  fi
+  exec node "$CLI_ENTRY" "$@"
+fi
+echo "RUDI: CLI entry not found at $CLI_ENTRY" 1>&2
+exit 127
+`
+    });
+  }
+
   // rudi-mcp shim for direct stack access
   shimDefs.push({
     name: 'rudi-mcp',
@@ -397,14 +455,16 @@ exec rudi mcp "$@"
   });
 
   // rudi-router shim for aggregated MCP server
+  const routerNodeBin = path.join(nodeBinDir, isWindows ? 'node.exe' : 'node');
   shimDefs.push({
     name: 'rudi-router',
     script: `#!/bin/bash
 # RUDI Router - Master MCP server for all installed stacks
 # Reads ~/.rudi/rudi.json and proxies tool calls to correct stack
 RUDI_HOME="$HOME/.rudi"
-if [ -x "$RUDI_HOME/runtimes/node/bin/node" ]; then
-  exec "$RUDI_HOME/runtimes/node/bin/node" "$RUDI_HOME/router/router-mcp.js" "$@"
+NODE_BIN="${routerNodeBin.replace(/"/g, '\\"')}"
+if [ -x "$NODE_BIN" ]; then
+  exec "$NODE_BIN" "$RUDI_HOME/router/router-mcp.js" "$@"
 else
   exec node "$RUDI_HOME/router/router-mcp.js" "$@"
 fi

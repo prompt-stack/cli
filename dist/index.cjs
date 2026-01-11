@@ -33,6 +33,35 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 
 // packages/env/src/index.js
+function getNodeRuntimeRoot() {
+  return import_path.default.join(PATHS.runtimes, "node");
+}
+function resolveNodeRuntimeBin(binName) {
+  const root = getNodeRuntimeRoot();
+  const isWindows = import_os.default.platform() === "win32";
+  const arch = import_os.default.arch() === "arm64" ? "arm64" : "x64";
+  const binDir = isWindows ? "Scripts" : "bin";
+  const candidates = [];
+  if (isWindows) {
+    const names = [`${binName}.cmd`, `${binName}.exe`, binName];
+    for (const name of names) {
+      candidates.push(import_path.default.join(root, arch, binDir, name));
+      candidates.push(import_path.default.join(root, binDir, name));
+    }
+  } else {
+    candidates.push(import_path.default.join(root, arch, binDir, binName));
+    candidates.push(import_path.default.join(root, binDir, binName));
+  }
+  for (const candidate of candidates) {
+    if (import_fs.default.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+function getNodeRuntimeBinDir() {
+  return import_path.default.dirname(resolveNodeRuntimeBin("node"));
+}
 function getPlatformArch() {
   const platform = import_os.default.platform();
   const arch = import_os.default.arch();
@@ -118,8 +147,20 @@ function isPackageInstalled(id) {
     return false;
   }
   if (kind2 === "agent") {
-    const binPath = import_path.default.join(packagePath, "node_modules", ".bin", name);
-    return import_fs.default.existsSync(binPath);
+    const manifestPath = import_path.default.join(packagePath, "manifest.json");
+    let bins = [];
+    if (import_fs.default.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(import_fs.default.readFileSync(manifestPath, "utf-8"));
+        bins = manifest.bins || manifest.binaries || [];
+      } catch {
+        bins = [];
+      }
+    }
+    if (bins.length === 0) {
+      bins = [name];
+    }
+    return bins.some((bin) => import_fs.default.existsSync(resolveNodeRuntimeBin(bin)));
   }
   try {
     const contents = import_fs.default.readdirSync(packagePath);
@@ -8726,6 +8767,8 @@ function resolveBinTarget(manifest, bin) {
       return import_path5.default.join(manifest.installDir, bin);
     case "npm":
       return import_path5.default.join(manifest.installDir, "node_modules", ".bin", bin);
+    case "npm-global":
+      return resolveNodeRuntimeBin(bin);
     case "pip":
       return import_path5.default.join(manifest.installDir, "venv", "bin", bin);
     case "system":
@@ -8830,9 +8873,18 @@ var init_shims = __esm({
 });
 
 // packages/core/src/installer.js
-function discoverNpmBins(installPath, packageName) {
+function getNpmModulesRoot(installRoot, scope = "local") {
+  if (scope === "global") {
+    return import_path6.default.join(installRoot, "lib", "node_modules");
+  }
+  return import_path6.default.join(installRoot, "node_modules");
+}
+function getNpmPackageJsonPath(installRoot, packageName, scope = "local") {
+  return import_path6.default.join(getNpmModulesRoot(installRoot, scope), packageName, "package.json");
+}
+function discoverNpmBins(installRoot, packageName, scope = "local") {
   try {
-    const pkgJsonPath = import_path6.default.join(installPath, "node_modules", packageName, "package.json");
+    const pkgJsonPath = getNpmPackageJsonPath(installRoot, packageName, scope);
     if (!import_fs5.default.existsSync(pkgJsonPath)) {
       console.warn(`[Installer] Warning: Could not find package.json at ${pkgJsonPath}`);
       return [];
@@ -8853,9 +8905,9 @@ function discoverNpmBins(installPath, packageName) {
     return [];
   }
 }
-function hasInstallScripts(installPath, packageName) {
+function hasInstallScripts(installRoot, packageName, scope = "local") {
   try {
-    const pkgJsonPath = import_path6.default.join(installPath, "node_modules", packageName, "package.json");
+    const pkgJsonPath = getNpmPackageJsonPath(installRoot, packageName, scope);
     if (!import_fs5.default.existsSync(pkgJsonPath)) {
       return false;
     }
@@ -8910,35 +8962,60 @@ async function installPackage(id, options = {}) {
 async function installSinglePackage(pkg, options = {}) {
   const { force = false, allowScripts = false, onProgress } = options;
   const installPath = getPackagePath(pkg.id);
+  const pkgName = pkg.id.replace(/^(runtime|binary|agent):/, "");
+  const isAgentNpm = pkg.kind === "agent" && pkg.npmPackage;
   if (import_fs5.default.existsSync(installPath) && !force) {
-    return { success: true, id: pkg.id, path: installPath, skipped: true };
+    if (!isAgentNpm) {
+      return { success: true, id: pkg.id, path: installPath, skipped: true };
+    }
+    const manifestPath = import_path6.default.join(installPath, "manifest.json");
+    let bins = pkg.bins || [];
+    if (import_fs5.default.existsSync(manifestPath)) {
+      try {
+        const manifest2 = JSON.parse(import_fs5.default.readFileSync(manifestPath, "utf-8"));
+        bins = manifest2.bins || manifest2.binaries || bins;
+      } catch {
+      }
+    }
+    if (bins.length === 0) {
+      bins = [pkgName];
+    }
+    const hasGlobalBin = bins.some((bin) => import_fs5.default.existsSync(resolveNodeRuntimeBin(bin)));
+    if (hasGlobalBin) {
+      return { success: true, id: pkg.id, path: installPath, skipped: true };
+    }
   }
   if (pkg.kind === "runtime" || pkg.kind === "binary" || pkg.kind === "agent") {
-    const pkgName = pkg.id.replace(/^(runtime|binary|agent):/, "");
     onProgress?.({ phase: "downloading", package: pkg.id });
     if (pkg.npmPackage) {
       try {
         const { execSync: execSync11 } = await import("child_process");
+        const npmInstallRoot = isAgentNpm ? getNodeRuntimeRoot() : installPath;
+        const npmScope = isAgentNpm ? "global" : "local";
         if (!import_fs5.default.existsSync(installPath)) {
           import_fs5.default.mkdirSync(installPath, { recursive: true });
         }
+        if (isAgentNpm && !import_fs5.default.existsSync(npmInstallRoot)) {
+          import_fs5.default.mkdirSync(npmInstallRoot, { recursive: true });
+        }
         onProgress?.({ phase: "installing", package: pkg.id, message: `npm install ${pkg.npmPackage}` });
         const resourcesPath = process.env.RESOURCES_PATH;
-        const npmCmd = resourcesPath ? import_path6.default.join(resourcesPath, "bundled-runtimes", "node", "bin", "npm") : "npm";
-        if (!import_fs5.default.existsSync(import_path6.default.join(installPath, "package.json"))) {
+        const npmCmd = resourcesPath ? import_path6.default.join(resourcesPath, "bundled-runtimes", "node", "bin", "npm") : await findNpmExecutable();
+        if (!isAgentNpm && !import_fs5.default.existsSync(import_path6.default.join(installPath, "package.json"))) {
           execSync11(`"${npmCmd}" init -y`, { cwd: installPath, stdio: "pipe" });
         }
         const shouldIgnoreScripts = pkg.source?.type === "npm" && !allowScripts;
         const installFlags = shouldIgnoreScripts ? "--ignore-scripts --no-audit --no-fund" : "--no-audit --no-fund";
-        execSync11(`"${npmCmd}" install ${pkg.npmPackage} ${installFlags}`, { cwd: installPath, stdio: "pipe" });
+        const installCmd = isAgentNpm ? `install -g ${pkg.npmPackage} ${installFlags} --prefix "${npmInstallRoot}"` : `install ${pkg.npmPackage} ${installFlags}`;
+        execSync11(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: "pipe" });
         let bins = pkg.bins;
         if (!bins || bins.length === 0) {
-          bins = discoverNpmBins(installPath, pkg.npmPackage);
+          bins = discoverNpmBins(npmInstallRoot, pkg.npmPackage, npmScope);
           console.log(`[Installer] Discovered binaries: ${bins.join(", ") || "(none)"}`);
         }
         let installedVersion = pkg.version || "latest";
         try {
-          const pkgJsonPath = import_path6.default.join(installPath, "node_modules", pkg.npmPackage, "package.json");
+          const pkgJsonPath = getNpmPackageJsonPath(npmInstallRoot, pkg.npmPackage, npmScope);
           if (import_fs5.default.existsSync(pkgJsonPath)) {
             const pkgJson = JSON.parse(import_fs5.default.readFileSync(pkgJsonPath, "utf8"));
             installedVersion = pkgJson.version;
@@ -8947,13 +9024,21 @@ async function installSinglePackage(pkg, options = {}) {
         }
         if (pkg.postInstall) {
           onProgress?.({ phase: "postInstall", package: pkg.id, message: pkg.postInstall });
+          const binDir = isAgentNpm ? getNodeRuntimeBinDir() : import_path6.default.join(installPath, "node_modules", ".bin");
           const postInstallCmd = pkg.postInstall.replace(
             /^npx\s+(\S+)/,
-            `"${import_path6.default.join(installPath, "node_modules", ".bin", "$1")}"`
+            `"${import_path6.default.join(binDir, "$1")}"`
           );
-          execSync11(postInstallCmd, { cwd: installPath, stdio: "pipe" });
+          execSync11(postInstallCmd, {
+            cwd: installPath,
+            stdio: "pipe",
+            env: {
+              ...process.env,
+              PATH: `${binDir}${import_path6.default.delimiter}${process.env.PATH || ""}`
+            }
+          });
         }
-        const scriptsDetected = hasInstallScripts(installPath, pkg.npmPackage);
+        const scriptsDetected = hasInstallScripts(npmInstallRoot, pkg.npmPackage, npmScope);
         const scriptsPolicy = installFlags.includes("--ignore-scripts") ? "ignore" : "allow";
         if (scriptsDetected && scriptsPolicy === "ignore") {
           console.warn(`
@@ -8972,6 +9057,8 @@ async function installSinglePackage(pkg, options = {}) {
           hasInstallScripts: scriptsDetected,
           scriptsPolicy,
           postInstall: pkg.postInstall,
+          installType: isAgentNpm ? "npm-global" : "npm",
+          npmPrefix: isAgentNpm ? npmInstallRoot : void 0,
           installedAt: (/* @__PURE__ */ new Date()).toISOString(),
           source: pkg.source || { type: "npm" }
         };
@@ -8982,13 +9069,19 @@ async function installSinglePackage(pkg, options = {}) {
         if (bins && bins.length > 0) {
           await createShimsForTool({
             id: pkg.id,
-            installType: "npm",
-            installDir: installPath,
+            installType: isAgentNpm ? "npm-global" : "npm",
+            installDir: npmInstallRoot,
             bins,
             name: pkgName
           });
         } else {
           console.warn(`[Installer] Warning: No binaries found for ${pkg.npmPackage}`);
+        }
+        if (isAgentNpm) {
+          const legacyPath = import_path6.default.join(installPath, "node_modules");
+          if (import_fs5.default.existsSync(legacyPath)) {
+            import_fs5.default.rmSync(legacyPath, { recursive: true, force: true });
+          }
         }
         return { success: true, id: pkg.id, path: installPath };
       } catch (error) {
@@ -9138,15 +9231,28 @@ async function uninstallPackage(id) {
   }
   try {
     let bins = [];
+    let manifest = null;
     if (kind2 !== "prompt") {
       const manifestPath = import_path6.default.join(installPath, "manifest.json");
       if (import_fs5.default.existsSync(manifestPath)) {
         try {
-          const manifest = JSON.parse(import_fs5.default.readFileSync(manifestPath, "utf-8"));
+          manifest = JSON.parse(import_fs5.default.readFileSync(manifestPath, "utf-8"));
           bins = manifest.bins || manifest.binaries || [];
         } catch {
           bins = [name];
         }
+      }
+    }
+    if (kind2 === "agent" && manifest?.npmPackage) {
+      try {
+        const { execSync: execSync11 } = await import("child_process");
+        const npmCmd = await findNpmExecutable();
+        const npmPrefix = getNodeRuntimeRoot();
+        execSync11(`"${npmCmd}" uninstall -g ${manifest.npmPackage} --prefix "${npmPrefix}" --no-audit --no-fund`, {
+          stdio: "pipe"
+        });
+      } catch (error) {
+        console.warn(`[Installer] Warning: Failed to uninstall ${manifest.npmPackage}: ${error.message}`);
       }
     }
     if (bins.length > 0) {
@@ -10358,6 +10464,8 @@ __export(src_exports2, {
   getInstallOrder: () => getInstallOrder,
   getInstalledPackages: () => getInstalledPackages,
   getLockfilePath: () => getLockfilePath,
+  getNodeRuntimeBinDir: () => getNodeRuntimeBinDir,
+  getNodeRuntimeRoot: () => getNodeRuntimeRoot,
   getPackage: () => getPackage,
   getPackagePath: () => getPackagePath,
   getShimOwner: () => getShimOwner,
@@ -10379,6 +10487,7 @@ __export(src_exports2, {
   registerSystemBinary: () => registerSystemBinary,
   removeShims: () => removeShims,
   removeStack: () => removeStack,
+  resolveNodeRuntimeBin: () => resolveNodeRuntimeBin,
   resolvePackage: () => resolvePackage,
   resolvePackages: () => resolvePackages,
   rudiConfigExists: () => rudiConfigExists,
@@ -39332,10 +39441,31 @@ function getVersion2(command, versionFlag) {
     return null;
   }
 }
+function getAgentBins(agentId) {
+  const manifestPath = import_path22.default.join(PATHS.agents, agentId, "manifest.json");
+  if (import_fs24.default.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(import_fs24.default.readFileSync(manifestPath, "utf-8"));
+      const bins = manifest.bins || manifest.binaries || [];
+      if (bins.length > 0) return bins;
+    } catch {
+    }
+  }
+  return [agentId];
+}
+function findRudiAgentBin(agentId) {
+  const bins = getAgentBins(agentId);
+  for (const bin of bins) {
+    const binPath = resolveNodeRuntimeBin(bin);
+    if (import_fs24.default.existsSync(binPath)) return binPath;
+  }
+  return null;
+}
 function findBinary(command, kind2 = "binary") {
   const rudiPaths = [
     import_path22.default.join(PATHS.agents, command, "node_modules", ".bin", command),
     import_path22.default.join(PATHS.runtimes, command, "bin", command),
+    resolveNodeRuntimeBin(command),
     import_path22.default.join(PATHS.binaries, command, command),
     import_path22.default.join(PATHS.binaries, command)
   ];
@@ -39358,8 +39488,8 @@ function findBinary(command, kind2 = "binary") {
   return { found: false, path: null, source: null };
 }
 function getAgentStatus(agent) {
-  const rudiPath = import_path22.default.join(PATHS.agents, agent.id, "node_modules", ".bin", agent.id);
-  const rudiInstalled = import_fs24.default.existsSync(rudiPath);
+  const rudiPath = findRudiAgentBin(agent.id);
+  const rudiInstalled = !!rudiPath;
   let globalPath = null;
   let globalInstalled = false;
   if (!rudiInstalled) {
@@ -39590,9 +39720,30 @@ function getVersion3(binaryPath, versionFlag = "--version") {
     return null;
   }
 }
+function getAgentBins2(name) {
+  const manifestPath = import_path23.default.join(PATHS.agents, name, "manifest.json");
+  if (import_fs25.default.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(import_fs25.default.readFileSync(manifestPath, "utf-8"));
+      const bins = manifest.bins || manifest.binaries || [];
+      if (bins.length > 0) return bins;
+    } catch {
+    }
+  }
+  return [name];
+}
+function findRudiAgentBin2(name) {
+  const bins = getAgentBins2(name);
+  for (const bin of bins) {
+    const binPath = resolveNodeRuntimeBin(bin);
+    if (import_fs25.default.existsSync(binPath)) return binPath;
+  }
+  return null;
+}
 function detectKindFromFilesystem(name) {
-  const agentPath = import_path23.default.join(PATHS.agents, name, "node_modules", ".bin", name);
-  if (import_fs25.default.existsSync(agentPath)) return "agent";
+  const agentManifestPath = import_path23.default.join(PATHS.agents, name, "manifest.json");
+  if (import_fs25.default.existsSync(agentManifestPath)) return "agent";
+  if (findRudiAgentBin2(name)) return "agent";
   const runtimePath = import_path23.default.join(PATHS.runtimes, name, "bin", name);
   if (import_fs25.default.existsSync(runtimePath)) return "runtime";
   const binaryPath = import_path23.default.join(PATHS.binaries, name, name);
@@ -39645,8 +39796,8 @@ async function cmdCheck(args, flags) {
   };
   switch (kind2) {
     case "agent": {
-      const rudiPath = import_path23.default.join(PATHS.agents, name, "node_modules", ".bin", name);
-      const rudiInstalled = import_fs25.default.existsSync(rudiPath);
+      const rudiPath = findRudiAgentBin2(name);
+      const rudiInstalled = !!rudiPath;
       let globalPath = null;
       let globalInstalled = false;
       if (!rudiInstalled) {
@@ -39801,16 +39952,6 @@ function getShimTarget(name, shimPath, type) {
 }
 function getPackageFromShim(shimName, target) {
   if (!target) return null;
-  const match = target.match(/\/(binaries|runtimes|agents)\/([^\/]+)/);
-  if (match) {
-    const [, kind2, pkgName] = match;
-    const kindMap = {
-      "binaries": "binary",
-      "runtimes": "runtime",
-      "agents": "agent"
-    };
-    return `${kindMap[kind2]}:${pkgName}`;
-  }
   const manifestDirs = [
     import_path24.default.join(PATHS.binaries),
     import_path24.default.join(PATHS.runtimes),
@@ -39833,6 +39974,16 @@ function getPackageFromShim(shimName, target) {
         }
       }
     }
+  }
+  const match = target.match(/\/(binaries|runtimes|agents)\/([^\/]+)/);
+  if (match) {
+    const [, kind2, pkgName] = match;
+    const kindMap = {
+      "binaries": "binary",
+      "runtimes": "runtime",
+      "agents": "agent"
+    };
+    return `${kindMap[kind2]}:${pkgName}`;
   }
   return null;
 }
@@ -40670,7 +40821,7 @@ async function cmdStudio(args, flags) {
 }
 
 // src/index.js
-var VERSION2 = true ? "1.10.8" : process.env.npm_package_version || "0.0.0";
+var VERSION2 = true ? "1.10.9" : process.env.npm_package_version || "0.0.0";
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));
   if (flags.version || flags.v) {

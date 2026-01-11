@@ -113,6 +113,17 @@ function getKindBasePath(kind) {
   }
 }
 
+function normalizeGlobalNpmCommands(commands) {
+  return commands.map(cmd => {
+    const binName = path.basename(cmd.bin || cmd.name);
+    return {
+      name: cmd.name,
+      bin: path.posix.join('bin', binName),
+      args: cmd.args || null,
+    };
+  });
+}
+
 /**
  * Process packages from a catalog directory
  */
@@ -122,8 +133,18 @@ function processPackages(catalogPath, kind) {
 
   return packages.map(pkg => {
     const id = pkg.id.replace(/^(runtime|binary|agent):/, '');
-    const installDir = getInstallDir(pkg, kind);
-    const basePath = getKindBasePath(kind);
+    let installDir = getInstallDir(pkg, kind);
+    let basePath = getKindBasePath(kind);
+    let installType = pkg.installType || 'binary';
+    let commands = extractCommands(pkg, kind);
+
+    const isGlobalNpmAgent = kind === 'agent' && (installType === 'npm' || pkg.npmPackage);
+    if (isGlobalNpmAgent) {
+      basePath = 'runtimes';
+      installDir = 'node';
+      installType = 'npm-global';
+      commands = normalizeGlobalNpmCommands(commands);
+    }
 
     return {
       id,
@@ -131,8 +152,8 @@ function processPackages(catalogPath, kind) {
       kind,
       installDir,
       basePath,
-      installType: pkg.installType || 'binary',
-      commands: extractCommands(pkg, kind),
+      installType,
+      commands,
     };
   });
 }

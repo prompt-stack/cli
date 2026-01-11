@@ -13,7 +13,7 @@
  *   2 = installed but not authenticated (agents only)
  */
 
-import { PATHS, isPackageInstalled, getPackagePath } from '@learnrudi/core';
+import { PATHS, isPackageInstalled, getPackagePath, resolveNodeRuntimeBin } from '@learnrudi/core';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -57,14 +57,38 @@ function getVersion(binaryPath, versionFlag = '--version') {
   }
 }
 
+function getAgentBins(name) {
+  const manifestPath = path.join(PATHS.agents, name, 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const bins = manifest.bins || manifest.binaries || [];
+      if (bins.length > 0) return bins;
+    } catch {
+      // Fall through to default
+    }
+  }
+  return [name];
+}
+
+function findRudiAgentBin(name) {
+  const bins = getAgentBins(name);
+  for (const bin of bins) {
+    const binPath = resolveNodeRuntimeBin(bin);
+    if (fs.existsSync(binPath)) return binPath;
+  }
+  return null;
+}
+
 /**
  * Auto-detect package kind by checking filesystem locations
  * Priority: agent > runtime > binary > stack (checks where it exists)
  */
 function detectKindFromFilesystem(name) {
   // Check RUDI agent location
-  const agentPath = path.join(PATHS.agents, name, 'node_modules', '.bin', name);
-  if (fs.existsSync(agentPath)) return 'agent';
+  const agentManifestPath = path.join(PATHS.agents, name, 'manifest.json');
+  if (fs.existsSync(agentManifestPath)) return 'agent';
+  if (findRudiAgentBin(name)) return 'agent';
 
   // Check RUDI runtime location
   const runtimePath = path.join(PATHS.runtimes, name, 'bin', name);
@@ -137,9 +161,9 @@ export async function cmdCheck(args, flags) {
   // Check installation based on kind
   switch (kind) {
     case 'agent': {
-      // Check RUDI location first (preferred)
-      const rudiPath = path.join(PATHS.agents, name, 'node_modules', '.bin', name);
-      const rudiInstalled = fs.existsSync(rudiPath);
+      // Check RUDI global location first (preferred)
+      const rudiPath = findRudiAgentBin(name);
+      const rudiInstalled = !!rudiPath;
 
       // Check global PATH as fallback
       let globalPath = null;
