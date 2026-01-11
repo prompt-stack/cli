@@ -9002,12 +9002,12 @@ async function installSinglePackage(pkg, options = {}) {
         const resourcesPath = process.env.RESOURCES_PATH;
         const npmCmd = resourcesPath ? import_path6.default.join(resourcesPath, "bundled-runtimes", "node", "bin", "npm") : await findNpmExecutable();
         if (!isAgentNpm && !import_fs5.default.existsSync(import_path6.default.join(installPath, "package.json"))) {
-          execSync11(`"${npmCmd}" init -y`, { cwd: installPath, stdio: "pipe" });
+          execSync11(`"${npmCmd}" init -y`, { cwd: installPath, stdio: "pipe", env: buildNpmEnv(npmCmd) });
         }
         const shouldIgnoreScripts = pkg.source?.type === "npm" && !allowScripts;
         const installFlags = shouldIgnoreScripts ? "--ignore-scripts --no-audit --no-fund" : "--no-audit --no-fund";
         const installCmd = isAgentNpm ? `install -g ${pkg.npmPackage} ${installFlags} --prefix "${npmInstallRoot}"` : `install ${pkg.npmPackage} ${installFlags}`;
-        execSync11(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: "pipe" });
+        execSync11(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: "pipe", env: buildNpmEnv(npmCmd) });
         let bins = pkg.bins;
         if (!bins || bins.length === 0) {
           bins = discoverNpmBins(npmInstallRoot, pkg.npmPackage, npmScope);
@@ -9249,7 +9249,8 @@ async function uninstallPackage(id) {
         const npmCmd = await findNpmExecutable();
         const npmPrefix = getNodeRuntimeRoot();
         execSync11(`"${npmCmd}" uninstall -g ${manifest.npmPackage} --prefix "${npmPrefix}" --no-audit --no-fund`, {
-          stdio: "pipe"
+          stdio: "pipe",
+          env: buildNpmEnv(npmCmd)
         });
       } catch (error) {
         console.warn(`[Installer] Warning: Failed to uninstall ${manifest.npmPackage}: ${error.message}`);
@@ -9434,7 +9435,7 @@ async function installStackDependencies(stackPath, onProgress) {
       onProgress?.({ phase: "installing-deps", message: "Installing Node.js dependencies..." });
       try {
         const npmCmd = await findNpmExecutable();
-        execSync11(`"${npmCmd}" install`, { cwd: nodePath, stdio: "pipe" });
+        execSync11(`"${npmCmd}" install`, { cwd: nodePath, stdio: "pipe", env: buildNpmEnv(npmCmd) });
       } catch (error) {
         console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
       }
@@ -9451,6 +9452,17 @@ async function installStackDependencies(stackPath, onProgress) {
       }
     }
   }
+}
+function buildNpmEnv(npmCmd) {
+  if (!import_path6.default.isAbsolute(npmCmd)) {
+    return process.env;
+  }
+  const npmBinDir = import_path6.default.dirname(npmCmd);
+  const basePath = process.env.PATH || "";
+  return {
+    ...process.env,
+    PATH: [npmBinDir, basePath].join(import_path6.default.delimiter)
+  };
 }
 async function findNpmExecutable() {
   const isWindows = process.platform === "win32";
@@ -40821,7 +40833,7 @@ async function cmdStudio(args, flags) {
 }
 
 // src/index.js
-var VERSION2 = true ? "1.10.9" : process.env.npm_package_version || "0.0.0";
+var VERSION2 = true ? "1.10.10" : process.env.npm_package_version || "0.0.0";
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));
   if (flags.version || flags.v) {

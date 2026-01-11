@@ -237,7 +237,7 @@ async function installSinglePackage(pkg, options = {}) {
 
         // Initialize package.json if needed (local installs only)
         if (!isAgentNpm && !fs.existsSync(path.join(installPath, 'package.json'))) {
-          execSync(`"${npmCmd}" init -y`, { cwd: installPath, stdio: 'pipe' });
+          execSync(`"${npmCmd}" init -y`, { cwd: installPath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
         }
 
         // Install the npm package with safety flags
@@ -251,7 +251,7 @@ async function installSinglePackage(pkg, options = {}) {
         const installCmd = isAgentNpm
           ? `install -g ${pkg.npmPackage} ${installFlags} --prefix "${npmInstallRoot}"`
           : `install ${pkg.npmPackage} ${installFlags}`;
-        execSync(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: 'pipe' });
+        execSync(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
 
         // Auto-discover bins if not specified (dynamic npm installs)
         let bins = pkg.bins;
@@ -563,7 +563,8 @@ export async function uninstallPackage(id) {
         const npmCmd = await findNpmExecutable();
         const npmPrefix = getNodeRuntimeRoot();
         execSync(`"${npmCmd}" uninstall -g ${manifest.npmPackage} --prefix "${npmPrefix}" --no-audit --no-fund`, {
-          stdio: 'pipe'
+          stdio: 'pipe',
+          env: buildNpmEnv(npmCmd)
         });
       } catch (error) {
         console.warn(`[Installer] Warning: Failed to uninstall ${manifest.npmPackage}: ${error.message}`);
@@ -841,7 +842,7 @@ async function installStackDependencies(stackPath, onProgress) {
       try {
         // Find npm executable (bundled from Studio, or system npm)
         const npmCmd = await findNpmExecutable();
-        execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe' });
+        execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
       } catch (error) {
         console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
         // Don't fail installation if deps fail - stack may still work
@@ -863,6 +864,24 @@ async function installStackDependencies(stackPath, onProgress) {
       }
     }
   }
+}
+
+/**
+ * Build env for npm so it can resolve the matching Node runtime
+ * @param {string} npmCmd
+ * @returns {NodeJS.ProcessEnv}
+ */
+function buildNpmEnv(npmCmd) {
+  if (!path.isAbsolute(npmCmd)) {
+    return process.env;
+  }
+
+  const npmBinDir = path.dirname(npmCmd);
+  const basePath = process.env.PATH || '';
+  return {
+    ...process.env,
+    PATH: [npmBinDir, basePath].join(path.delimiter)
+  };
 }
 
 /**
