@@ -237,7 +237,7 @@ async function installSinglePackage(pkg, options = {}) {
 
         // Initialize package.json if needed (local installs only)
         if (!isAgentNpm && !fs.existsSync(path.join(installPath, 'package.json'))) {
-          execSync(`"${npmCmd}" init -y`, { cwd: installPath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
+          execSync(`"${npmCmd}" init -y`, { cwd: installPath, stdio: 'pipe', env: buildNodeToolEnv(npmCmd) });
         }
 
         // Install the npm package with safety flags
@@ -251,7 +251,7 @@ async function installSinglePackage(pkg, options = {}) {
         const installCmd = isAgentNpm
           ? `install -g ${pkg.npmPackage} ${installFlags} --prefix "${npmInstallRoot}"`
           : `install ${pkg.npmPackage} ${installFlags}`;
-        execSync(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
+        execSync(`"${npmCmd}" ${installCmd}`, { cwd: installPath, stdio: 'pipe', env: buildNodeToolEnv(npmCmd) });
 
         // Auto-discover bins if not specified (dynamic npm installs)
         let bins = pkg.bins;
@@ -564,7 +564,7 @@ export async function uninstallPackage(id) {
         const npmPrefix = getNodeRuntimeRoot();
         execSync(`"${npmCmd}" uninstall -g ${manifest.npmPackage} --prefix "${npmPrefix}" --no-audit --no-fund`, {
           stdio: 'pipe',
-          env: buildNpmEnv(npmCmd)
+          env: buildNodeToolEnv(npmCmd)
         });
       } catch (error) {
         console.warn(`[Installer] Warning: Failed to uninstall ${manifest.npmPackage}: ${error.message}`);
@@ -825,7 +825,7 @@ export async function updateAll(options = {}) {
 }
 
 /**
- * Install dependencies for a stack (npm install for node, pip install for python)
+ * Install dependencies for a stack (pnpm preferred for node, pip install for python)
  * @param {string} stackPath - Path to the installed stack
  * @param {Function} [onProgress] - Progress callback
  * @returns {Promise<void>}
@@ -839,13 +839,34 @@ async function installStackDependencies(stackPath, onProgress) {
     const packageJsonPath = path.join(nodePath, 'package.json');
     if (fs.existsSync(packageJsonPath)) {
       onProgress?.({ phase: 'installing-deps', message: 'Installing Node.js dependencies...' });
+      let installedWithPnpm = false;
       try {
-        // Find npm executable (bundled from Studio, or system npm)
-        const npmCmd = await findNpmExecutable();
-        execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe', env: buildNpmEnv(npmCmd) });
+        const pnpmStore = path.join(PATHS.cache, 'pnpm');
+        const corepackHome = path.join(PATHS.cache, 'corepack');
+        const corepackCmd = await findCorepackExecutable();
+        fs.mkdirSync(pnpmStore, { recursive: true });
+        fs.mkdirSync(corepackHome, { recursive: true });
+
+        const corepackEnv = buildNodeToolEnv(corepackCmd, { COREPACK_HOME: corepackHome });
+        execSync(`"${corepackCmd}" prepare pnpm@9 --activate`, { cwd: nodePath, stdio: 'pipe', env: corepackEnv });
+        execSync(`"${corepackCmd}" pnpm install --store-dir "${pnpmStore}" --prefer-frozen-lockfile`, {
+          cwd: nodePath,
+          stdio: 'pipe',
+          env: corepackEnv
+        });
+        installedWithPnpm = true;
       } catch (error) {
-        console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
-        // Don't fail installation if deps fail - stack may still work
+        console.warn(`Warning: pnpm install failed, falling back to npm: ${error.message}`);
+      }
+
+      if (!installedWithPnpm) {
+        try {
+          const npmCmd = await findNpmExecutable();
+          execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe', env: buildNodeToolEnv(npmCmd) });
+        } catch (error) {
+          console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
+          // Don't fail installation if deps fail - stack may still work
+        }
       }
     }
   }
@@ -867,20 +888,23 @@ async function installStackDependencies(stackPath, onProgress) {
 }
 
 /**
- * Build env for npm so it can resolve the matching Node runtime
- * @param {string} npmCmd
+ * Build env for Node tooling so it can resolve the matching runtime
+ * @param {string} toolCmd
+ * @param {NodeJS.ProcessEnv} [extraEnv]
  * @returns {NodeJS.ProcessEnv}
  */
-function buildNpmEnv(npmCmd) {
-  if (!path.isAbsolute(npmCmd)) {
-    return process.env;
+function buildNodeToolEnv(toolCmd, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
+
+  if (!path.isAbsolute(toolCmd)) {
+    return env;
   }
 
-  const npmBinDir = path.dirname(npmCmd);
-  const basePath = process.env.PATH || '';
+  const toolBinDir = path.dirname(toolCmd);
+  const basePath = env.PATH || '';
   return {
-    ...process.env,
-    PATH: [npmBinDir, basePath].join(path.delimiter)
+    ...env,
+    PATH: [toolBinDir, basePath].join(path.delimiter)
   };
 }
 
@@ -915,6 +939,32 @@ async function findNpmExecutable() {
   // Fallback to system npm (for CLI users who installed via npm)
   return 'npm';
 }
+
+/**
+ * Find corepack executable - prioritize bundled from Studio, fallback to system
+ * Matches Studio's RuntimeController.getArchPath() pattern
+ * @returns {Promise<string>} Path to corepack executable
+ */
+async function findCorepackExecutable() {
+  const isWindows = process.platform === 'win32';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const binDir = isWindows ? '' : 'bin';
+  const exe = isWindows ? 'corepack.cmd' : 'corepack';
+
+  const bundledNodeBase = path.join(PATHS.runtimes, 'node');
+  const archSpecificCorepack = path.join(bundledNodeBase, arch, binDir, exe);
+  if (fs.existsSync(archSpecificCorepack)) {
+    return archSpecificCorepack;
+  }
+
+  const flatCorepack = path.join(bundledNodeBase, binDir, exe);
+  if (fs.existsSync(flatCorepack)) {
+    return flatCorepack;
+  }
+
+  return 'corepack';
+}
+
 
 /**
  * Find python executable - prioritize bundled from Studio, fallback to system
