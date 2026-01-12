@@ -97,6 +97,8 @@ OPTIONS
   --binaries       Filter to binaries only
   --agents         Filter to agents only
   --all            List all packages (no query needed)
+  --fresh          Refresh registry cache before searching
+  --no-cache       Alias for --fresh
   --json           Output as JSON
 
 EXAMPLES

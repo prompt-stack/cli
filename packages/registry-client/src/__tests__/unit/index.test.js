@@ -21,8 +21,8 @@ test('config: RUNTIMES_DOWNLOAD_BASE is valid URL', () => {
   assert.ok(RUNTIMES_DOWNLOAD_BASE.includes('github'));
 });
 
-test('config: CACHE_TTL is 24 hours in milliseconds', () => {
-  const expectedMs = 24 * 60 * 60 * 1000;
+test('config: CACHE_TTL is 1 hour in milliseconds', () => {
+  const expectedMs = 60 * 60 * 1000;
   assert.strictEqual(CACHE_TTL, expectedMs);
 });
 

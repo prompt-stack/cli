@@ -13,7 +13,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import { installPackage, resolvePackage, checkAllDependencies, formatDependencyResults, addStack, updateSecretStatus } from '@learnrudi/core';
+import { fetchIndex, installPackage, resolvePackage, checkAllDependencies, formatDependencyResults, addStack, removeStack, updateSecretStatus } from '@learnrudi/core';
 import { hasSecret, listSecrets, setSecret, getSecret } from '@learnrudi/secrets';
 import { getInstalledAgents } from '@learnrudi/mcp';
 
@@ -61,25 +61,64 @@ function getBundledBinary(runtime, binary) {
   return binary;
 }
 
+function getStackRuntime(manifest) {
+  return manifest?.runtime || manifest?.mcp?.runtime || 'node';
+}
+
+function getStackCommand(manifest) {
+  let command = manifest?.command;
+
+  if (!command || command.length === 0) {
+    if (manifest?.mcp?.command) {
+      const mcpCmd = manifest.mcp.command;
+      const mcpArgs = manifest.mcp.args || [];
+      command = [mcpCmd, ...mcpArgs];
+    }
+  }
+
+  return command;
+}
+
+function getNodeProjectInfo(stackPath) {
+  const candidates = [stackPath, path.join(stackPath, 'node')];
+
+  for (const root of candidates) {
+    const packageJsonPath = path.join(root, 'package.json');
+    if (!fsSync.existsSync(packageJsonPath)) continue;
+
+    try {
+      const content = fsSync.readFileSync(packageJsonPath, 'utf-8');
+      const packageJson = JSON.parse(content);
+      return { root, packageJsonPath, packageJson };
+    } catch (error) {
+      return { root, packageJsonPath, error: error.message };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Install dependencies for a stack based on its runtime
  * Uses bundled runtimes from ~/.rudi/runtimes/ when available
  */
-async function installDependencies(stackPath, manifest) {
-  const runtime = manifest?.runtime || manifest?.mcp?.runtime || 'node';
+async function installDependencies(stackPath, manifest, options = {}) {
+  const { includeDevDeps = false, nodeProject } = options;
+  const runtime = getStackRuntime(manifest);
 
   try {
     if (runtime === 'node') {
-      // Check if package.json exists
-      const packageJsonPath = path.join(stackPath, 'package.json');
-      try {
-        await fs.access(packageJsonPath);
-      } catch {
+      const project = nodeProject || getNodeProjectInfo(stackPath);
+      if (!project) {
         return { installed: false, reason: 'No package.json' };
       }
 
+      if (project.error) {
+        return { installed: false, error: `Failed to read package.json: ${project.error}` };
+      }
+
       // Check if node_modules already exists
-      const nodeModulesPath = path.join(stackPath, 'node_modules');
+      const nodeModulesPath = path.join(project.root, 'node_modules');
       try {
         await fs.access(nodeModulesPath);
         return { installed: false, reason: 'Dependencies already installed' };
@@ -90,8 +129,9 @@ async function installDependencies(stackPath, manifest) {
       // Use bundled npm if available
       const npmCmd = getBundledBinary('node', 'npm');
       console.log(`  Installing npm dependencies...`);
-      execSync(`"${npmCmd}" install --production`, {
-        cwd: stackPath,
+      const installArgs = includeDevDeps ? 'install' : 'install --production';
+      execSync(`"${npmCmd}" ${installArgs}`, {
+        cwd: project.root,
         stdio: 'pipe',
       });
       return { installed: true };
@@ -163,24 +203,13 @@ function getSecretLabel(secret) {
 }
 
 /**
- * Validate that a stack's entry point exists
- * @returns {{ valid: boolean, error?: string }}
+ * Find a stack entry point from its command
+ * @returns {{ entryArg: string|null, entryPath: string|null, error?: string }}
  */
-function validateStackEntryPoint(stackPath, manifest) {
-  // Get command from manifest
-  let command = manifest.command;
-
+function getStackEntryPoint(stackPath, manifest) {
+  const command = getStackCommand(manifest);
   if (!command || command.length === 0) {
-    // Try legacy mcp format
-    if (manifest.mcp?.command) {
-      const mcpCmd = manifest.mcp.command;
-      const mcpArgs = manifest.mcp.args || [];
-      command = [mcpCmd, ...mcpArgs];
-    }
-  }
-
-  if (!command || command.length === 0) {
-    return { valid: false, error: 'No command defined in manifest' };
+    return { entryArg: null, entryPath: null, error: 'No command defined in manifest' };
   }
 
   // Skip these - they're runtime commands or npx runners, not files
@@ -203,13 +232,80 @@ function validateStackEntryPoint(stackPath, manifest) {
 
     // This should be the entry point file
     const entryPath = path.join(stackPath, arg);
-    if (!fsSync.existsSync(entryPath)) {
-      return { valid: false, error: `Entry point not found: ${arg}` };
-    }
+    return { entryArg: arg, entryPath };
+  }
+
+  return { entryArg: null, entryPath: null }; // No file args found, assume command is valid
+}
+
+/**
+ * Validate that a stack's entry point exists
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateStackEntryPoint(stackPath, manifest) {
+  const entryPoint = getStackEntryPoint(stackPath, manifest);
+
+  if (entryPoint.error) {
+    return { valid: false, error: entryPoint.error };
+  }
+
+  if (!entryPoint.entryPath) {
     return { valid: true };
   }
 
-  return { valid: true }; // No file args found, assume command is valid
+  if (!fsSync.existsSync(entryPoint.entryPath)) {
+    return { valid: false, error: `Entry point not found: ${entryPoint.entryArg}` };
+  }
+
+  return { valid: true };
+}
+
+async function buildStackIfNeeded(stackPath, manifest, options = {}) {
+  const { nodeProject, verbose = false } = options;
+  const runtime = getStackRuntime(manifest);
+
+  if (runtime !== 'node') {
+    return { built: false, reason: 'Non-node runtime' };
+  }
+
+  const entryPoint = getStackEntryPoint(stackPath, manifest);
+  if (entryPoint.error) {
+    return { built: false, reason: entryPoint.error };
+  }
+
+  if (!entryPoint.entryPath || fsSync.existsSync(entryPoint.entryPath)) {
+    return { built: false, reason: 'Entry point already present' };
+  }
+
+  const project = nodeProject || getNodeProjectInfo(stackPath);
+  if (!project) {
+    return { built: false, reason: 'No package.json' };
+  }
+
+  if (project.error) {
+    throw new Error(`Failed to read package.json: ${project.error}`);
+  }
+
+  if (!project.packageJson?.scripts?.build) {
+    return { built: false, reason: 'No build script' };
+  }
+
+  const npmCmd = getBundledBinary('node', 'npm');
+  console.log(`  Building stack...`);
+
+  try {
+    execSync(`"${npmCmd}" run build`, {
+      cwd: project.root,
+      stdio: verbose ? 'inherit' : 'pipe',
+    });
+  } catch (buildError) {
+    const stderr = buildError.stderr?.toString() || '';
+    const stdout = buildError.stdout?.toString() || '';
+    const output = stderr || stdout || buildError.message;
+    throw new Error(`Build failed:\n${output}`);
+  }
+
+  return { built: true };
 }
 
 /**
@@ -263,6 +359,24 @@ async function parseEnvExample(installPath) {
   }
 }
 
+async function cleanupFailedStackInstall(stackId, stackPath, removeConfig) {
+  if (stackPath) {
+    try {
+      await fs.rm(stackPath, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+
+  if (removeConfig && stackId) {
+    try {
+      removeStack(stackId);
+    } catch {
+      // Ignore config cleanup errors
+    }
+  }
+}
+
 export async function cmdInstall(args, flags) {
   const pkgId = args[0];
 
@@ -282,6 +396,10 @@ export async function cmdInstall(args, flags) {
   console.log(`Resolving ${pkgId}...`);
 
   try {
+    if (!pkgId.startsWith('npm:')) {
+      await fetchIndex({ force: true });
+    }
+
     // First resolve to show what will be installed
     const resolved = await resolvePackage(pkgId);
 
@@ -358,7 +476,12 @@ export async function cmdInstall(args, flags) {
       }
     });
 
-    if (result.success) {
+    if (!result.success) {
+      console.error(`\n✗ Installation failed: ${result.error}`);
+      process.exit(1);
+    }
+
+    if (resolved.kind !== 'stack') {
       console.log(`\n✓ Installed ${result.id}`);
       console.log(`  Path: ${result.path}`);
 
@@ -369,129 +492,147 @@ export async function cmdInstall(args, flags) {
         }
       }
 
-      // For stacks: validate, install dependencies, check secrets, show next steps
-      if (resolved.kind === 'stack') {
-        const manifest = await loadManifest(result.path);
-        if (manifest) {
-          // Validate entry point exists
-          const validation = validateStackEntryPoint(result.path, manifest);
-          if (!validation.valid) {
-            console.error(`\n✗ Stack validation failed: ${validation.error}`);
-            console.error(`  The stack may be incomplete or misconfigured.`);
-            process.exit(1);
-          }
+      console.log(`\n✓ Installed successfully.`);
+      return;
+    }
 
-          // Install runtime dependencies (npm install, pip install, etc.)
-          const depResult = await installDependencies(result.path, manifest);
-          if (depResult.installed) {
-            console.log(`  ✓ Dependencies installed`);
-          } else if (depResult.error) {
-            console.error(`\n✗ Failed to install dependencies:`);
-            console.error(`  ${depResult.error}`);
-            console.error(`\n  Stack installed but may not work. Fix dependencies and run:`);
-            console.error(`  rudi install ${result.id}`);
-            process.exit(1);
-          }
+    const manifest = await loadManifest(result.path);
+    if (!manifest) {
+      await cleanupFailedStackInstall(result.id, result.path, false);
+      throw new Error('Stack manifest not found after install');
+    }
 
-          // Update rudi.json with stack info (for router-mcp)
-          try {
-            addStack(result.id, {
-              path: result.path,
-              runtime: manifest.runtime || manifest.mcp?.runtime || 'node',
-              command: manifest.command || (manifest.mcp?.command ? [manifest.mcp.command, ...(manifest.mcp.args || [])] : null),
-              secrets: getManifestSecrets(manifest),
-              version: manifest.version
-            });
-            console.log(`  ✓ Updated rudi.json`);
-          } catch (err) {
-            console.log(`  ⚠ Failed to update rudi.json: ${err.message}`);
-          }
+    const nodeProject = getNodeProjectInfo(result.path);
+    const includeDevDeps = Boolean(nodeProject?.packageJson?.scripts?.build);
+    let stackRegistered = false;
 
-          // Check secrets status
-          const { found, missing } = await checkSecrets(manifest);
+    try {
+      const depResult = await installDependencies(result.path, manifest, {
+        includeDevDeps,
+        nodeProject
+      });
 
-          // Also check .env.example for any keys not in manifest
-          const envExampleKeys = await parseEnvExample(result.path);
-          for (const key of envExampleKeys) {
-            if (!found.includes(key) && !missing.includes(key)) {
-              const exists = await hasSecret(key);
-              if (!exists) {
-                missing.push(key);
-              } else {
-                found.push(key);
-              }
-            }
-          }
-
-          // Add placeholder entries to secrets.json for missing secrets
-          // This makes it visible what needs to be configured
-          if (missing.length > 0) {
-            for (const key of missing) {
-              const existing = await getSecret(key);
-              if (existing === null) {
-                // Add empty placeholder - hasSecret() will return false for empty strings
-                await setSecret(key, '');
-              }
-              // Update rudi.json secrets metadata
-              try {
-                updateSecretStatus(key, false);
-              } catch {
-                // Ignore errors updating secret status
-              }
-            }
-          }
-
-          // Update rudi.json for found secrets
-          for (const key of found) {
-            try {
-              updateSecretStatus(key, true);
-            } catch {
-              // Ignore errors updating secret status
-            }
-          }
-
-          // Show next steps
-          console.log(`\nNext steps:`);
-
-          // 1. Secrets
-          if (missing.length > 0) {
-            console.log(`\n  1. Configure secrets (${missing.length} pending):`);
-            for (const key of missing) {
-              const secret = getManifestSecrets(manifest).find(s =>
-                (typeof s === 'string' ? s : s.name) === key
-              );
-              const helpUrl = getSecretLink(secret);
-              console.log(`     rudi secrets set ${key} "<your-value>"`);
-              if (helpUrl) {
-                console.log(`     # Get yours: ${helpUrl}`);
-              }
-            }
-            console.log(`\n     Check status: rudi secrets list`);
-          } else if (found.length > 0) {
-            console.log(`\n  1. Secrets: ✓ ${found.length} configured`);
-          } else {
-            console.log(`\n  1. Secrets: ✓ None required`);
-          }
-
-          // 2. Integrate
-          const agents = getInstalledAgents();
-          if (agents.length > 0) {
-            console.log(`\n  2. Wire up your agents:`);
-            console.log(`     rudi integrate all`);
-            console.log(`     # Detected: ${agents.map(a => a.name).join(', ')}`);
-          }
-
-          // 3. Done
-          console.log(`\n  3. Restart your agent to use the stack`);
-          return;
-        }
+      if (depResult.installed) {
+        console.log(`  ✓ Dependencies installed`);
+      } else if (depResult.error) {
+        throw new Error(`Failed to install dependencies:\n${depResult.error}`);
       }
 
-      console.log(`\n✓ Installed successfully.`);
-    } else {
-      console.error(`\n✗ Installation failed: ${result.error}`);
-      process.exit(1);
+      const buildResult = await buildStackIfNeeded(result.path, manifest, {
+        nodeProject,
+        verbose: flags.verbose
+      });
+
+      if (buildResult.built) {
+        console.log(`  ✓ Build complete`);
+      }
+
+      const validation = validateStackEntryPoint(result.path, manifest);
+      if (!validation.valid) {
+        throw new Error(`Stack validation failed: ${validation.error}`);
+      }
+
+      addStack(result.id, {
+        path: result.path,
+        runtime: getStackRuntime(manifest),
+        command: getStackCommand(manifest),
+        secrets: getManifestSecrets(manifest),
+        version: manifest.version
+      });
+      stackRegistered = true;
+      console.log(`  ✓ Updated rudi.json`);
+    } catch (stackError) {
+      await cleanupFailedStackInstall(result.id, result.path, stackRegistered);
+      throw stackError;
     }
+
+    console.log(`\n✓ Installed ${result.id}`);
+    console.log(`  Path: ${result.path}`);
+
+    if (result.installed?.length > 0) {
+      console.log(`\n  Also installed:`);
+      for (const id of result.installed) {
+        console.log(`    - ${id}`);
+      }
+    }
+
+    // Check secrets status
+    const { found, missing } = await checkSecrets(manifest);
+
+    // Also check .env.example for any keys not in manifest
+    const envExampleKeys = await parseEnvExample(result.path);
+    for (const key of envExampleKeys) {
+      if (!found.includes(key) && !missing.includes(key)) {
+        const exists = await hasSecret(key);
+        if (!exists) {
+          missing.push(key);
+        } else {
+          found.push(key);
+        }
+      }
+    }
+
+    // Add placeholder entries to secrets.json for missing secrets
+    // This makes it visible what needs to be configured
+    if (missing.length > 0) {
+      for (const key of missing) {
+        const existing = await getSecret(key);
+        if (existing === null) {
+          // Add empty placeholder - hasSecret() will return false for empty strings
+          await setSecret(key, '');
+        }
+        // Update rudi.json secrets metadata
+        try {
+          updateSecretStatus(key, false);
+        } catch {
+          // Ignore errors updating secret status
+        }
+      }
+    }
+
+    // Update rudi.json for found secrets
+    for (const key of found) {
+      try {
+        updateSecretStatus(key, true);
+      } catch {
+        // Ignore errors updating secret status
+      }
+    }
+
+    // Show next steps
+    console.log(`\nNext steps:`);
+
+    // 1. Secrets
+    if (missing.length > 0) {
+      console.log(`\n  1. Configure secrets (${missing.length} pending):`);
+      for (const key of missing) {
+        const secret = getManifestSecrets(manifest).find(s =>
+          (typeof s === 'string' ? s : s.name) === key
+        );
+        const helpUrl = getSecretLink(secret);
+        console.log(`     rudi secrets set ${key} "<your-value>"`);
+        if (helpUrl) {
+          console.log(`     # Get yours: ${helpUrl}`);
+        }
+      }
+      console.log(`\n     Check status: rudi secrets list`);
+    } else if (found.length > 0) {
+      console.log(`\n  1. Secrets: ✓ ${found.length} configured`);
+    } else {
+      console.log(`\n  1. Secrets: ✓ None required`);
+    }
+
+    // 2. Integrate
+    const agents = getInstalledAgents();
+    if (agents.length > 0) {
+      console.log(`\n  2. Wire up your agents:`);
+      console.log(`     rudi integrate all`);
+      console.log(`     # Detected: ${agents.map(a => a.name).join(', ')}`);
+    }
+
+    // 3. Done
+    console.log(`\n  3. Restart your agent to use the stack`);
+    return;
 
   } catch (error) {
     console.error(`Installation failed: ${error.message}`);

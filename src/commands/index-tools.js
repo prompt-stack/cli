@@ -11,7 +11,9 @@
  * uses for fast tools/list without spawning all stacks.
  */
 
-import { indexAllStacks, readToolIndex, TOOL_INDEX_PATH } from '@learnrudi/core';
+import fs from 'fs';
+import path from 'path';
+import { indexAllStacks, readToolIndex, TOOL_INDEX_PATH, PATHS } from '@learnrudi/core';
 import { readRudiConfig } from '@learnrudi/core';
 
 export async function cmdIndex(args, flags) {
@@ -30,9 +32,58 @@ export async function cmdIndex(args, flags) {
     id => config.stacks[id].installed
   );
 
+  const stackRoot = PATHS.stacks;
+  const filesystemStacks = fs.existsSync(stackRoot)
+    ? fs.readdirSync(stackRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map(entry => entry.name)
+    : [];
+
+  const registeredNames = new Set(
+    installedStacks.map(id => id.replace(/^stack:/, ''))
+  );
+
+  const orphanedStacks = filesystemStacks.filter(
+    name => !registeredNames.has(name)
+  );
+
+  const missingStacks = installedStacks.filter(id => {
+    const expectedPath = config.stacks[id]?.path || path.join(stackRoot, id.replace(/^stack:/, ''));
+    return !fs.existsSync(expectedPath);
+  });
+
+  if (!jsonOutput) {
+    if (orphanedStacks.length > 0) {
+      console.log(`⚠ Found unregistered stack(s) on disk:`);
+      for (const name of orphanedStacks) {
+        console.log(`  - ${name}`);
+        console.log(`    Path: ${path.join(stackRoot, name)}`);
+      }
+      console.log(`\n  Register with: rudi install stack:<name> --force`);
+      console.log('');
+    }
+
+    if (missingStacks.length > 0) {
+      console.log(`⚠ Found registered stack(s) missing on disk:`);
+      for (const id of missingStacks) {
+        const expectedPath = config.stacks[id]?.path || path.join(stackRoot, id.replace(/^stack:/, ''));
+        console.log(`  - ${id}`);
+        console.log(`    Expected: ${expectedPath}`);
+      }
+      console.log(`\n  Fix with: rudi remove <stack> or reinstall`);
+      console.log('');
+    }
+  }
+
   if (installedStacks.length === 0) {
     if (jsonOutput) {
-      console.log(JSON.stringify({ indexed: 0, failed: 0, stacks: [] }));
+      console.log(JSON.stringify({
+        indexed: 0,
+        failed: 0,
+        stacks: [],
+        orphaned: orphanedStacks,
+        missing: missingStacks
+      }));
     } else {
       console.log('No installed stacks to index.');
       console.log('\nInstall stacks with: rudi install <stack>');
@@ -41,7 +92,8 @@ export async function cmdIndex(args, flags) {
   }
 
   // Check which stacks to index
-  const stacksToIndex = stackFilter
+  const missingSet = new Set(missingStacks);
+  const stacksToIndex = (stackFilter
     ? stackFilter.filter(id => {
         if (!installedStacks.includes(id)) {
           if (!jsonOutput) {
@@ -51,11 +103,17 @@ export async function cmdIndex(args, flags) {
         }
         return true;
       })
-    : installedStacks;
+    : installedStacks).filter(id => !missingSet.has(id));
 
   if (stacksToIndex.length === 0) {
     if (jsonOutput) {
-      console.log(JSON.stringify({ indexed: 0, failed: 0, stacks: [] }));
+      console.log(JSON.stringify({
+        indexed: 0,
+        failed: 0,
+        stacks: [],
+        orphaned: orphanedStacks,
+        missing: missingStacks
+      }));
     } else {
       console.log('No valid stacks to index.');
     }
@@ -81,6 +139,8 @@ export async function cmdIndex(args, flags) {
           failed: 0,
           cached: true,
           totalTools,
+          orphaned: orphanedStacks,
+          missing: missingStacks,
           stacks: stacksToIndex.map(id => ({
             id,
             tools: existingIndex.byStack[id]?.tools?.length || 0,
@@ -120,6 +180,8 @@ export async function cmdIndex(args, flags) {
         indexed: result.indexed,
         failed: result.failed,
         totalTools,
+        orphaned: orphanedStacks,
+        missing: missingStacks,
         stacks: stacksToIndex.map(id => ({
           id,
           tools: result.index.byStack[id]?.tools?.length || 0,

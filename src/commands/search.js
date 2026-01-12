@@ -2,7 +2,7 @@
  * Search command - search registry for packages
  */
 
-import { searchPackages, listPackages } from '@learnrudi/core';
+import { fetchIndex, searchPackages, listPackages } from '@learnrudi/core';
 
 function pluralizeKind(kind) {
   if (!kind) return 'packages';
@@ -15,6 +15,11 @@ function headingForKind(kind) {
 
 export async function cmdSearch(args, flags) {
   const query = args[0];
+  const refreshRegistry = flags.fresh || flags['no-cache'] || false;
+
+  if (refreshRegistry) {
+    await fetchIndex({ force: true });
+  }
 
   // Handle --all flag to list everything
   if (flags.all || flags.a) {

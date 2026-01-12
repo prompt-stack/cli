@@ -25,9 +25,9 @@ export const DEFAULT_REGISTRY_URL = 'https://raw.githubusercontent.com/learn-rud
 export const RUNTIMES_DOWNLOAD_BASE = 'https://github.com/learn-rudi/registry/releases/download';
 
 /**
- * Cache TTL in milliseconds (24 hours)
+ * Cache TTL in milliseconds (1 hour)
  */
-export const CACHE_TTL = 24 * 60 * 60 * 1000;
+export const CACHE_TTL = 60 * 60 * 1000;
 
 /**
  * Local registry paths (for development)
