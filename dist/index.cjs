@@ -9428,49 +9428,59 @@ async function updateAll(options = {}) {
 }
 async function installStackDependencies(stackPath, onProgress) {
   const { execSync: execSync11 } = await import("child_process");
-  const nodePath = import_path6.default.join(stackPath, "node");
-  if (import_fs5.default.existsSync(nodePath)) {
+  const nodeDepsPaths = [
+    stackPath,
+    // Flat layout: package.json at stack root
+    import_path6.default.join(stackPath, "node")
+    // Structured layout: node/package.json
+  ];
+  for (const nodePath of nodeDepsPaths) {
     const packageJsonPath = import_path6.default.join(nodePath, "package.json");
-    if (import_fs5.default.existsSync(packageJsonPath)) {
-      onProgress?.({ phase: "installing-deps", message: "Installing Node.js dependencies..." });
-      let installedWithPnpm = false;
-      try {
+    if (!import_fs5.default.existsSync(packageJsonPath)) continue;
+    onProgress?.({ phase: "installing-deps", message: "Installing Node.js dependencies..." });
+    let installedWithPnpm = false;
+    try {
+      const pnpmCmd = await findPnpmExecutable();
+      if (pnpmCmd) {
         const pnpmStore = import_path6.default.join(PATHS.cache, "pnpm");
-        const corepackHome = import_path6.default.join(PATHS.cache, "corepack");
-        const corepackCmd = await findCorepackExecutable();
         import_fs5.default.mkdirSync(pnpmStore, { recursive: true });
-        import_fs5.default.mkdirSync(corepackHome, { recursive: true });
-        const corepackEnv = buildNodeToolEnv(corepackCmd, { COREPACK_HOME: corepackHome });
-        execSync11(`"${corepackCmd}" prepare pnpm@9 --activate`, { cwd: nodePath, stdio: "pipe", env: corepackEnv });
-        execSync11(`"${corepackCmd}" pnpm install --store-dir "${pnpmStore}" --prefer-frozen-lockfile`, {
+        execSync11(`"${pnpmCmd}" install --store-dir "${pnpmStore}" --prefer-frozen-lockfile`, {
           cwd: nodePath,
           stdio: "pipe",
-          env: corepackEnv
+          env: buildNodeToolEnv(pnpmCmd)
         });
         installedWithPnpm = true;
-      } catch (error) {
-        console.warn(`Warning: pnpm install failed, falling back to npm: ${error.message}`);
+        onProgress?.({ phase: "installing-deps", message: "Dependencies installed with pnpm (shared store)" });
       }
-      if (!installedWithPnpm) {
-        try {
-          const npmCmd = await findNpmExecutable();
-          execSync11(`"${npmCmd}" install`, { cwd: nodePath, stdio: "pipe", env: buildNodeToolEnv(npmCmd) });
-        } catch (error) {
-          console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
-        }
-      }
+    } catch (error) {
+      console.warn(`Warning: pnpm install failed, falling back to npm: ${error.message}`);
     }
-  }
-  const pythonPath = import_path6.default.join(stackPath, "python");
-  if (import_fs5.default.existsSync(pythonPath)) {
-    const requirementsPath = import_path6.default.join(pythonPath, "requirements.txt");
-    if (import_fs5.default.existsSync(requirementsPath)) {
+    if (!installedWithPnpm) {
       try {
-        await installPythonRequirements(pythonPath, onProgress);
+        const npmCmd = await findNpmExecutable();
+        execSync11(`"${npmCmd}" install`, { cwd: nodePath, stdio: "pipe", env: buildNodeToolEnv(npmCmd) });
+        onProgress?.({ phase: "installing-deps", message: "Dependencies installed with npm" });
       } catch (error) {
-        console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
+        console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
       }
     }
+    break;
+  }
+  const pythonDepsPaths = [
+    stackPath,
+    // Flat layout: requirements.txt at stack root
+    import_path6.default.join(stackPath, "python")
+    // Structured layout: python/requirements.txt
+  ];
+  for (const pythonPath of pythonDepsPaths) {
+    const requirementsPath = import_path6.default.join(pythonPath, "requirements.txt");
+    if (!import_fs5.default.existsSync(requirementsPath)) continue;
+    try {
+      await installPythonRequirements(pythonPath, onProgress);
+    } catch (error) {
+      console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
+    }
+    break;
   }
 }
 function buildNodeToolEnv(toolCmd, extraEnv = {}) {
@@ -9501,21 +9511,27 @@ async function findNpmExecutable() {
   }
   return "npm";
 }
-async function findCorepackExecutable() {
+async function findPnpmExecutable() {
   const isWindows = process.platform === "win32";
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const binDir = isWindows ? "" : "bin";
-  const exe = isWindows ? "corepack.cmd" : "corepack";
+  const exe = isWindows ? "pnpm.cmd" : "pnpm";
   const bundledNodeBase = import_path6.default.join(PATHS.runtimes, "node");
-  const archSpecificCorepack = import_path6.default.join(bundledNodeBase, arch, binDir, exe);
-  if (import_fs5.default.existsSync(archSpecificCorepack)) {
-    return archSpecificCorepack;
+  const archSpecificPnpm = import_path6.default.join(bundledNodeBase, arch, binDir, exe);
+  if (import_fs5.default.existsSync(archSpecificPnpm)) {
+    return archSpecificPnpm;
   }
-  const flatCorepack = import_path6.default.join(bundledNodeBase, binDir, exe);
-  if (import_fs5.default.existsSync(flatCorepack)) {
-    return flatCorepack;
+  const flatPnpm = import_path6.default.join(bundledNodeBase, binDir, exe);
+  if (import_fs5.default.existsSync(flatPnpm)) {
+    return flatPnpm;
   }
-  return "corepack";
+  try {
+    const { execSync: execSync11 } = await import("child_process");
+    execSync11("pnpm --version", { stdio: "pipe" });
+    return "pnpm";
+  } catch {
+    return null;
+  }
 }
 async function findPythonExecutable() {
   const isWindows = process.platform === "win32";
@@ -40870,7 +40886,7 @@ async function cmdStudio(args, flags) {
 }
 
 // src/index.js
-var VERSION2 = true ? "1.10.11" : process.env.npm_package_version || "0.0.0";
+var VERSION2 = true ? "1.10.12" : process.env.npm_package_version || "0.0.0";
 async function main() {
   const { command, args, flags } = parseArgs(process.argv.slice(2));
   if (flags.version || flags.v) {

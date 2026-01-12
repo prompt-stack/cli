@@ -833,57 +833,76 @@ export async function updateAll(options = {}) {
 async function installStackDependencies(stackPath, onProgress) {
   const { execSync } = await import('child_process');
 
-  // Check for node runtime
-  const nodePath = path.join(stackPath, 'node');
-  if (fs.existsSync(nodePath)) {
-    const packageJsonPath = path.join(nodePath, 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      onProgress?.({ phase: 'installing-deps', message: 'Installing Node.js dependencies...' });
-      let installedWithPnpm = false;
-      try {
-        const pnpmStore = path.join(PATHS.cache, 'pnpm');
-        const corepackHome = path.join(PATHS.cache, 'corepack');
-        const corepackCmd = await findCorepackExecutable();
-        fs.mkdirSync(pnpmStore, { recursive: true });
-        fs.mkdirSync(corepackHome, { recursive: true });
+  // Check for Node.js dependencies
+  // Support both flat layout (package.json at root) and structured layout (node/package.json)
+  const nodeDepsPaths = [
+    stackPath,                          // Flat layout: package.json at stack root
+    path.join(stackPath, 'node'),       // Structured layout: node/package.json
+  ];
 
-        const corepackEnv = buildNodeToolEnv(corepackCmd, { COREPACK_HOME: corepackHome });
-        execSync(`"${corepackCmd}" prepare pnpm@9 --activate`, { cwd: nodePath, stdio: 'pipe', env: corepackEnv });
-        execSync(`"${corepackCmd}" pnpm install --store-dir "${pnpmStore}" --prefer-frozen-lockfile`, {
+  for (const nodePath of nodeDepsPaths) {
+    const packageJsonPath = path.join(nodePath, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) continue;
+
+    onProgress?.({ phase: 'installing-deps', message: 'Installing Node.js dependencies...' });
+    let installedWithPnpm = false;
+
+    // Try pnpm first (if installed) - uses shared store for disk efficiency
+    try {
+      const pnpmCmd = await findPnpmExecutable();
+      if (pnpmCmd) {
+        const pnpmStore = path.join(PATHS.cache, 'pnpm');
+        fs.mkdirSync(pnpmStore, { recursive: true });
+
+        execSync(`"${pnpmCmd}" install --store-dir "${pnpmStore}" --prefer-frozen-lockfile`, {
           cwd: nodePath,
           stdio: 'pipe',
-          env: corepackEnv
+          env: buildNodeToolEnv(pnpmCmd)
         });
         installedWithPnpm = true;
-      } catch (error) {
-        console.warn(`Warning: pnpm install failed, falling back to npm: ${error.message}`);
+        onProgress?.({ phase: 'installing-deps', message: 'Dependencies installed with pnpm (shared store)' });
       }
-
-      if (!installedWithPnpm) {
-        try {
-          const npmCmd = await findNpmExecutable();
-          execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe', env: buildNodeToolEnv(npmCmd) });
-        } catch (error) {
-          console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
-          // Don't fail installation if deps fail - stack may still work
-        }
-      }
+    } catch (error) {
+      console.warn(`Warning: pnpm install failed, falling back to npm: ${error.message}`);
     }
-  }
 
-  // Check for python runtime
-  const pythonPath = path.join(stackPath, 'python');
-  if (fs.existsSync(pythonPath)) {
-    const requirementsPath = path.join(pythonPath, 'requirements.txt');
-    if (fs.existsSync(requirementsPath)) {
+    // Fall back to npm
+    if (!installedWithPnpm) {
       try {
-        // Use uv if available (10-100x faster), fallback to pip
-        await installPythonRequirements(pythonPath, onProgress);
+        const npmCmd = await findNpmExecutable();
+        execSync(`"${npmCmd}" install`, { cwd: nodePath, stdio: 'pipe', env: buildNodeToolEnv(npmCmd) });
+        onProgress?.({ phase: 'installing-deps', message: 'Dependencies installed with npm' });
       } catch (error) {
-        console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
+        console.warn(`Warning: Failed to install Node.js dependencies: ${error.message}`);
         // Don't fail installation if deps fail - stack may still work
       }
     }
+
+    // Only install deps once (first matching path wins)
+    break;
+  }
+
+  // Check for Python dependencies
+  // Support both flat layout (requirements.txt at root) and structured layout (python/requirements.txt)
+  const pythonDepsPaths = [
+    stackPath,                            // Flat layout: requirements.txt at stack root
+    path.join(stackPath, 'python'),       // Structured layout: python/requirements.txt
+  ];
+
+  for (const pythonPath of pythonDepsPaths) {
+    const requirementsPath = path.join(pythonPath, 'requirements.txt');
+    if (!fs.existsSync(requirementsPath)) continue;
+
+    try {
+      // Use uv if available (10-100x faster), fallback to pip
+      await installPythonRequirements(pythonPath, onProgress);
+    } catch (error) {
+      console.warn(`Warning: Failed to install Python dependencies: ${error.message}`);
+      // Don't fail installation if deps fail - stack may still work
+    }
+
+    // Only install deps once (first matching path wins)
+    break;
   }
 }
 
@@ -963,6 +982,42 @@ async function findCorepackExecutable() {
   }
 
   return 'corepack';
+}
+
+/**
+ * Find pnpm executable - check RUDI runtime first, then system
+ * pnpm should be installed via: npm install -g pnpm (in RUDI's node runtime)
+ * @returns {Promise<string|null>} Path to pnpm executable, or null if not found
+ */
+async function findPnpmExecutable() {
+  const isWindows = process.platform === 'win32';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const binDir = isWindows ? '' : 'bin';
+  const exe = isWindows ? 'pnpm.cmd' : 'pnpm';
+
+  const bundledNodeBase = path.join(PATHS.runtimes, 'node');
+
+  // Try architecture-specific path first (e.g., node/arm64/bin/pnpm)
+  const archSpecificPnpm = path.join(bundledNodeBase, arch, binDir, exe);
+  if (fs.existsSync(archSpecificPnpm)) {
+    return archSpecificPnpm;
+  }
+
+  // Try flat structure (e.g., node/bin/pnpm)
+  const flatPnpm = path.join(bundledNodeBase, binDir, exe);
+  if (fs.existsSync(flatPnpm)) {
+    return flatPnpm;
+  }
+
+  // Check if pnpm is in system PATH
+  try {
+    const { execSync } = await import('child_process');
+    execSync('pnpm --version', { stdio: 'pipe' });
+    return 'pnpm';
+  } catch {
+    // pnpm not found
+    return null;
+  }
 }
 
 
